@@ -1,0 +1,44 @@
+# SonarQube для разового прогона на своей машине.
+#
+#     docker compose -f tools/sonar/compose.yaml up -d
+#     ...дождаться http://localhost:9000 (первый запуск — минуты полторы)
+#     SONAR_HOST_URL=http://localhost:9000 SONAR_TOKEN=... ./gradlew sonar
+#
+# Отдельно от deploy/compose намеренно: это инструмент проверки, а не часть
+# системы, и подниматься он должен тогда, когда нужен. База — встроенная:
+# история между запусками здесь никому не нужна, а внешний PostgreSQL добавил бы
+# к стенду ещё один контейнер.
+services:
+  sonarqube:
+    image: sonarqube:26.8.0.126808-community
+    ports:
+      - "127.0.0.1:9000:9000"
+    environment:
+      # Проверки Elasticsearch при запуске: они рассчитаны на выделенный сервер
+      # и на машине разработчика не проходят (vm.max_map_count).
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+      # Предел памяти самой программы, а не только контейнера: половина —
+      # веб-части, половина — поисковому движку.
+      SONAR_WEB_JAVAOPTS: -Xmx1g
+      SONAR_SEARCH_JAVAOPTS: -Xmx1g
+      SONAR_CE_JAVAOPTS: -Xmx1g
+    volumes:
+      - sonar-data:/opt/sonarqube/data
+      - sonar-extensions:/opt/sonarqube/extensions
+      - sonar-logs:/opt/sonarqube/logs
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 4G
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:9000/api/system/status | grep -q UP"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 60s
+
+volumes:
+  sonar-data:
+  sonar-extensions:
+  sonar-logs:

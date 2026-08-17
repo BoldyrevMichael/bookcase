@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+
+    <!--
+        CRLF_INJECTION_LOGS срабатывает на любой параметризованной записи в лог,
+        то есть практически на каждом вызове логгера. Перевод строки в записи
+        экранируется кодировщиком структурного лога, поэтому подстановка значения
+        сама по себе журнал не подделывает.
+    -->
+    <Match>
+        <Bug pattern="CRLF_INJECTION_LOGS"/>
+    </Match>
+
+    <!-- Сгенерированный Lombok код не является предметом анализа. -->
+    <Match>
+        <Class name="~.*\$.*Builder"/>
+    </Match>
+
+    <!--
+        SPRING_ENDPOINT помечает всякий контроллер как место, куда приходят данные
+        извне. Это верно и относится к каждому контроллеру без исключения, то есть
+        дефекта не описывает. Разбор входящих данных проверяется другими правилами.
+    -->
+    <Match>
+        <Bug pattern="SPRING_ENDPOINT"/>
+    </Match>
+
+    <!--
+        Настройка Spring Security строится методом build(), объявленным с throws
+        Exception, — сузить объявление в собственном коде невозможно.
+    -->
+    <Match>
+        <Class name="~.*(SecurityConfig|SecurityAutoConfiguration)"/>
+        <Bug pattern="THROWS_METHOD_THROWS_CLAUSE_BASIC_EXCEPTION"/>
+    </Match>
+
+    <!--
+        EI_EXPOSE_REP2 требует копировать то, что пришло в конструктор. Для служб Spring
+        это бессмысленно: соединение с базой, клиент хранилища и настройки — общие
+        объекты приложения, их и полагается держать одной ссылкой, а не копией.
+        Возвращающая половина правила (EI_EXPOSE_REP) остаётся включённой.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
+
+    <!--
+        В тестах объявление throws Exception — обычное дело, а разыменование того,
+        что метод объявил как возможный null, приводит к падению теста, то есть
+        ровно к тому, ради чего тест и написан.
+    -->
+    <Match>
+        <Class name="~.*Test"/>
+        <Or>
+            <Bug pattern="THROWS_METHOD_THROWS_CLAUSE_BASIC_EXCEPTION"/>
+            <Bug pattern="NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE"/>
+            <Bug pattern="UNSAFE_HASH_EQUALS"/>
+        </Or>
+    </Match>
+
+</FindBugsFilter>

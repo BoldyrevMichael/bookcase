@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Загрузка — bookcase</title>
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<main>
+    <h1>Загрузка книг</h1>
+
+    <div class="panel">
+        <p class="note tight">
+            Файлы можно выбрать пачкой или перетащить сюда. Разбираются EPUB, FB2, PDF, DJVU и TXT;
+            формат определяется по содержимому, поэтому расширение может врать или отсутствовать.
+        </p>
+        <div class="row">
+            <label class="visually-hidden" for="files">Файлы книг</label>
+            <input type="file" id="files" multiple class="grow">
+            <button class="primary" id="send">Загрузить</button>
+        </div>
+        <div id="drop" class="empty dropzone">
+            перетащите файлы сюда
+        </div>
+    </div>
+
+    <h2>Что происходит</h2>
+    <table class="list" id="queue">
+        <thead>
+        <tr><th>Файл</th><th class="col-state">Состояние</th><th class="col-result">Итог</th></tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+    <p class="empty" id="nothing">Пока ничего не загружали.</p>
+</main>
+
+<script src="/js/app.js" defer></script>
+<script src="/js/upload.js" defer></script>
+</body>
+</html>

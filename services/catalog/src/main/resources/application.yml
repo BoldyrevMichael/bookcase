@@ -1,0 +1,118 @@
+spring:
+  application:
+    name: catalog
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/catalog}
+    username: ${DB_USERNAME:catalog}
+    password: ${DB_PASSWORD:service}
+    hikari:
+      maximum-pool-size: 10
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:29092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JacksonJsonSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+    consumer:
+      group-id: catalog
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JacksonJsonDeserializer
+        spring.json.trusted.packages: com.bookcase.events
+        enable.auto.commit: false
+    listener:
+      ack-mode: record
+      # Идентификатор запроса передаётся вместе с сообщением: без этого путь книги
+      # обрывается на очереди, и связать разбор с появлением карточки уже нечем.
+      observation-enabled: true
+    template:
+      observation-enabled: true
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Издатель — адрес, видимый браузеру; ключи забираются изнутри сети напрямую.
+          issuer-uri: ${OIDC_ISSUER:http://localhost:8180/realms/bookcase}
+          jwk-set-uri: ${OIDC_JWK_SET_URI:http://localhost:8180/realms/bookcase/protocol/openid-connect/certs}
+          audiences: ${OIDC_AUDIENCE:bookcase-api}
+
+bookcase:
+  security:
+    # Адреса страниц, с которых принимаются изменяющие запросы. Пусто — проверка
+    # источника не делается: так работают программные клиенты, у которых источника нет.
+    allowed-origins: ${ALLOWED_ORIGINS:}
+
+  catalog:
+    # Адрес хранилища для обращений сервиса и адрес того же хранилища для ссылок,
+    # по которым пойдёт браузер. Внутри сети имя одно, снаружи другое.
+    storage-url: ${STORAGE_URL:http://localhost:8082}
+    storage-public-url: ${STORAGE_PUBLIC_URL:http://localhost:4180}
+    default-page-size: ${DEFAULT_PAGE_SIZE:30}
+    max-page-size: ${MAX_PAGE_SIZE:100}
+
+server:
+  port: 8080
+
+# Журнал в машиночитаемом виде: записи разбираются сборщиком построчно, а не выуживаются
+# из текста выражениями. Формат ECS — общий словарь имён полей, его понимают и Elasticsearch,
+# и Loki, и Grafana. На своей машине это читается хуже человеком, поэтому включается
+# переменной: в кластере — да, при запуске из среды разработки — нет.
+logging:
+  structured:
+    format:
+      console: ${LOG_FORMAT:}
+  # Сквозной идентификатор запроса и отрезка: по ним собирается путь одной книги
+  # через все сервисы. В обычный текстовый вывод они добавляются здесь, в структурный
+  # попадают сами.
+  pattern:
+    correlation: "[${spring.application.name:},%X{traceId:-},%X{spanId:-}] "
+  include-application-name: false
+
+management:
+  # Сколько запросов прослеживать. По умолчанию — десятая часть, и это разумно там, где
+  # трасс много и хранение стоит денег. Здесь поток небольшой, а неполная выборка означала
+  # бы, что путь части книг не проследить вовсе, — поэтому все. Уменьшать это значение
+  # осмысленно вместе с ростом нагрузки, для того оно и вынесено в переменную.
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING:1.0}
+  metrics:
+    # Метка сервиса проставляется здесь, а не при сборе. Иначе она зависела бы от того,
+    # как настроен Prometheus: в стенде цели перечислены вручную и метку можно приписать
+    # там, а в кластере цели находятся сами, и такой метки у них нет — дашборд, собранный
+    # на стенде, в кластере молча перестал бы группировать.
+    tags:
+      service: ${spring.application.name}
+    distribution:
+      # Деления гистограммы для времени ответа. Без них Micrometer публикует только
+      # сумму и количество, а по ним долю не посчитать: панель «95-я доля» остаётся
+      # пустой. Считает долю Prometheus по делениям — так её можно сложить по всем
+      # экземплярам сервиса, чего с долями, посчитанными внутри процесса, не сделать.
+      percentiles-histogram:
+        http.server.requests: true
+  # Куда отправлять трассы, решает окружение: переменная
+  # MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT (в стенде и в кластере — Tempo).
+  # Не задана — отправитель не создаётся вовсе: при запуске из среды разработки и в
+  # проверках никто никуда не стучится, а идентификатор в журнале остаётся на месте.
+  server:
+    port: 8081
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true

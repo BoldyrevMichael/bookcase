@@ -1,0 +1,31 @@
+{{- if .Values.gateway.enabled }}
+# Вход в кластер описан объектами Gateway API, а не Ingress: Ingress выведен
+# из развития, а расширения к нему у каждой реализации были свои.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ .Values.gateway.name }}
+spec:
+  gatewayClassName: {{ .Values.gateway.className }}
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: {{ .Values.gateway.port }}
+      allowedRoutes:
+        namespaces:
+          # Маршруты объявляют сами сервисы, каждый свои, — и живут они в этом же
+          # пространстве имён.
+          from: Same
+{{- end }}
+---
+{{- if .Values.gateway.enabled }}
+# Класс шлюза: связывает наш Gateway с тем, кто его обслуживает. Envoy Gateway
+# ставится своим чартом и класс за собой не создаёт — без этого объекта Gateway
+# так и остаётся в состоянии «жду контроллера».
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: {{ .Values.gateway.className }}
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+{{- end }}

@@ -1,0 +1,51 @@
+# Страницы. Единственный не-Java релиз, и различия видны сразу: нет служебного порта,
+# нет базы и очереди, пробы смотрят на сам сайт.
+image:
+  repository: bookcase/web
+
+ports:
+  api: 8080
+  management: null
+
+probes:
+  path:
+    liveness: /
+    readiness: /
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 16Mi
+  limits:
+    cpu: 200m
+    memory: 64Mi
+
+security:
+  runAsUser: 101
+
+tmpSizeLimit: 16Mi
+# Непривилегированный nginx пишет сюда свои временные файлы, а корневая система
+# доступна только для чтения.
+extraWritablePaths:
+  - name: cache
+    path: /var/cache/nginx
+    sizeLimit: 32Mi
+  - name: run
+    path: /run
+    sizeLimit: 8Mi
+
+env: {}
+envFromSecret: {}
+
+# Наружу сервис выставляет не он сам, а шлюз входа: он единственная точка,
+# через которую приходят и браузер, и программные клиенты.
+route:
+  enabled: false
+
+network:
+  allowFrom: ["oauth2-proxy"]
+  toDatabase: false
+  toKafka: false
+  toTempo: false
+  # Страницы отдаёт nginx: токены он не проверяет и наружу не ходит вовсе.
+  toKeycloak: false

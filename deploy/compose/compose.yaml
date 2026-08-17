@@ -1,0 +1,602 @@
+name: bookcase
+
+# Локальный стенд: всё, что нужно сервисам bookcase, кроме самих сервисов.
+# Значения берутся из .env — скопируйте .env.example и правьте при желании.
+# Наружу порты публикуются только на 127.0.0.1: стенд не должен оказаться
+# в сети по недосмотру.
+#
+# У каждого контейнера задан предел по памяти и процессорам. Это не формальность:
+# без предела Java-процессы (Keycloak, Kafka) считают своей всю память машины и
+# разрастаются под неё, а один захлебнувшийся контейнер утягивает за собой
+# остальные. Пределы взяты с запасом примерно вдвое от измеренного потребления
+# на холостом ходу; суммарно стенд укладывается в 4 ГБ.
+
+services:
+
+  # ── База данных ─────────────────────────────────────────────────────────────
+  # Одна СУБД, но своя база и своя роль у каждого сервиса: сервис не может
+  # заглянуть в чужие таблицы даже по ошибке, а перенос базы в отдельный
+  # экземпляр сводится к смене адреса.
+  postgres:
+    image: postgres:18-alpine
+    command:
+      - postgres
+      - -c
+      - max_connections=100
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - work_mem=8MB
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?скопируйте .env.example в .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?скопируйте .env.example в .env}
+      POSTGRES_DB: postgres
+      SERVICE_DB_PASSWORD: ${SERVICE_DB_PASSWORD:?скопируйте .env.example в .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 512M
+
+  # ── Обмен сообщениями ───────────────────────────────────────────────────────
+  # Kafka в режиме KRaft: без ZooKeeper, один узел совмещает роли брокера и
+  # контроллера. Слушателей два: kafka:9092 для контейнеров и localhost:29092
+  # для запусков с машины разработчика (тесты, консольные утилиты).
+  kafka:
+    image: apache/kafka:4.3.1
+    environment:
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID:?скопируйте .env.example в .env}
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Топики заводятся явно (kafka-topics ниже): случайная опечатка в имени
+      # должна кончаться ошибкой, а не молча созданным топиком с одной партицией.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      # Куча задаётся явно, а не долей от памяти машины: у соседа по стенду
+      # памяти столько же, и делить её должен человек, а не случай.
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx768m
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    ports:
+      - "127.0.0.1:29092:29092"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+
+  # Разовый заход: создаёт топики с нужным числом партиций и сроками хранения.
+  # Число партиций выбирается один раз наперёд — потребителей не может быть
+  # больше, чем партиций, а увеличение партиций ломает порядок внутри ключа.
+  kafka-topics:
+    image: apache/kafka:4.3.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./kafka/create-topics.sh:/create-topics.sh:ro
+    entrypoint: ["/bin/sh", "/create-topics.sh"]
+    environment:
+      BOOTSTRAP_SERVER: kafka:9092
+      KAFKA_HEAP_OPTS: -Xmx256m
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  # ── Объектное хранилище ─────────────────────────────────────────────────────
+  # SeaweedFS в режиме server: мастер, том, файлер и шлюз S3 в одном процессе.
+  # Владелец хранилища — сервис storage, он единственный ходит сюда с ключами.
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.41
+    # Без -ip.bind=0.0.0.0 процесс слушает только адрес контейнера: снаружи
+    # порты работают, а проверка состояния изнутри получает «отказано
+    # в соединении» и контейнер навсегда остаётся нездоровым.
+    command: >
+      server -dir=/data -s3 -s3.config=/etc/seaweedfs/s3.json
+      -ip.bind=0.0.0.0 -master.volumeSizeLimitMB=2048 -volume.max=0
+    volumes:
+      - seaweedfs-data:/data
+      - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    ports:
+      - "127.0.0.1:8333:8333"   # S3
+      - "127.0.0.1:9333:9333"   # мастер, состояние кластера
+      - "127.0.0.1:8888:8888"   # файлер
+    healthcheck:
+      # Проверяются и мастер, и файлер: корзины заводятся через файлер, а он
+      # поднимается позже мастера — по одному мастеру можно решить, что всё готово,
+      # и получить отказ на первой же команде.
+      test:
+        - CMD-SHELL
+        - >-
+          wget -q -O /dev/null http://localhost:9333/cluster/healthz &&
+          wget -q -O /dev/null http://localhost:8888/
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          # Книга в гигабайт проходит через хранилище кусками, и на буферы при
+          # записи ему нужно заметно больше, чем на холостом ходу: с прежними
+          # 512 МБ загрузка файла на 532 МБ заканчивалась убийством процесса
+          # по нехватке памяти (код выхода 137).
+          memory: 2G
+
+  # Разовый заход: заводит корзины и правило автоудаления для экспортов.
+  seaweedfs-buckets:
+    image: chrislusf/seaweedfs:4.41
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+    volumes:
+      - ./seaweedfs/create-buckets.sh:/create-buckets.sh:ro
+    entrypoint: ["/bin/sh", "/create-buckets.sh"]
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+
+  # ── Учётные записи ──────────────────────────────────────────────────────────
+  # Keycloak со своей базой и импортом realm при первом запуске. Режим start-dev
+  # — только для стенда: в кластере тот же образ запускается командой start.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.1
+    command: ["start-dev", "--import-realm"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${SERVICE_DB_PASSWORD:?скопируйте .env.example в .env}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER:?скопируйте .env.example в .env}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?скопируйте .env.example в .env}
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_HTTP_ENABLED: "true"
+      # Издатель задаётся явно. Иначе Keycloak подставляет в claim iss тот
+      # адрес, по которому к нему пришли, и один и тот же пользователь получает
+      # токены с разным издателем (localhost, 127.0.0.1, keycloak) — проверять
+      # издателя на стороне сервиса становится нечем.
+      KC_HOSTNAME: http://localhost:8180
+      # Доля от предела контейнера, а не от памяти машины: без этого Java
+      # считает своей всю память хоста и на стенде разрастается до гигабайта.
+      JAVA_OPTS_APPEND: -XX:MaxRAMPercentage=70
+    volumes:
+      - ./keycloak/import:/opt/keycloak/data/import:ro
+    ports:
+      # Наружу 8180: порт 8080 оставлен сервисам, они занимают его по умолчанию.
+      - "127.0.0.1:8180:8080"
+      - "127.0.0.1:9000:9000"   # состояние и метрики, отдельно от прикладного порта
+    healthcheck:
+      # В образе нет ни curl, ни wget — стучимся во встроенный порт состояния
+      # средствами самой оболочки.
+      test:
+        - CMD-SHELL
+        - |
+          exec 3<>/dev/tcp/localhost/9000 &&
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q '"status": "UP"' <&3
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+
+  # ── Сессии браузера ─────────────────────────────────────────────────────────
+  # Valkey (не Redis — лицензия) держит сессии oauth2-proxy: токены Keycloak
+  # в cookie не помещаются.
+  valkey:
+    # Предел памяти задан и самому Valkey: упереться в него должен процесс,
+    # понимающий, что делать дальше, а не ядро с его безусловным убийством.
+    # Вытесняются только ключи со сроком жизни — у сессий он есть у всех.
+    command:
+      - valkey-server
+      - --requirepass
+      - ${VALKEY_PASSWORD:?скопируйте .env.example в .env}
+      - --save
+      - ""
+      - --maxmemory
+      - 96mb
+      - --maxmemory-policy
+      - volatile-lru
+    image: valkey/valkey:9.1.1-alpine
+    environment:
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD}
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -a \"$$VALKEY_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+  # ── Вход в систему ──────────────────────────────────────────────────────────
+  # oauth2-proxy как BFF: сам проходит OIDC, держит сессию в Valkey, браузеру
+  # отдаёт только HttpOnly-cookie. Запросы с готовым Bearer пропускаются мимо
+  # сессии — это путь программных клиентов.
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.3
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    command: ["--config=/etc/oauth2-proxy/oauth2-proxy.cfg"]
+    environment:
+      OAUTH2_PROXY_CLIENT_ID: ${BFF_CLIENT_ID:?скопируйте .env.example в .env}
+      OAUTH2_PROXY_CLIENT_SECRET: ${BFF_CLIENT_SECRET:?скопируйте .env.example в .env}
+      OAUTH2_PROXY_COOKIE_SECRET: ${BFF_COOKIE_SECRET:?скопируйте .env.example в .env}
+      OAUTH2_PROXY_REDIS_CONNECTION_URL: redis://:${VALKEY_PASSWORD}@valkey:6379
+      # Куда идут запросы к API. Адрес без завершающей косой черты — это точное
+      # совпадение пути, с ней — совпадение по началу, поэтому у каждого раздела
+      # записаны оба: иначе POST на /api/v1/files ушёл бы не в тот сервис. Частные
+      # адреса стоят раньше общего. По умолчанию это контейнеры сервисов; при
+      # отладке сервиса с машины разработчика список заменяется в .env на адреса
+      # с host.docker.internal (на Linux с включённым брандмауэром понадобится
+      # разрешить обращения с моста docker0 — см. README).
+      OAUTH2_PROXY_UPSTREAMS: ${API_UPSTREAMS:-http://storage:8080/api/v1/files,http://storage:8080/api/v1/files/,http://storage:8080/api/v1/archives,http://storage:8080/api/v1/archives/,http://ingester:8080/api/v1/ingestions,http://ingester:8080/api/v1/ingestions/,http://catalog:8080/api/v1/books,http://catalog:8080/api/v1/books/,http://catalog:8080/api/v1/collections,http://catalog:8080/api/v1/collections/,http://catalog:8080/api/v1/themes,http://catalog:8080/api/v1/exports,http://catalog:8080/api/v1/exports/,http://catalog:8080/api/v1/,http://web:80/}
+    volumes:
+      - ./oauth2-proxy/oauth2-proxy.cfg:/etc/oauth2-proxy/oauth2-proxy.cfg:ro
+    ports:
+      - "127.0.0.1:4180:4180"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 128M
+
+  # ── Сервисы ─────────────────────────────────────────────────────────────────
+  # Поднимаются отдельным профилем: `docker compose --profile services up -d`.
+  # Собранный jar запускается в базовом образе JRE и подключается томом —
+  # правка кода стоит `./gradlew bootJar` и перезапуска контейнера, без сборки
+  # образа. Свой образ у сервиса появится вместе с выкатом в кластер.
+  catalog:
+    profiles: ["services"]
+    image: eclipse-temurin:25-jre
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    command: ["sh", "-c", "exec java -jar /app/*.jar"]
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/catalog
+      DB_USERNAME: catalog
+      DB_PASSWORD: ${SERVICE_DB_PASSWORD}
+      KAFKA_BOOTSTRAP: kafka:9092
+      # Адрес хранилища для обращений сервиса и он же для ссылок, по которым
+      # пойдёт браузер: снаружи всё видно через шлюз.
+      STORAGE_URL: http://storage:8080
+      STORAGE_PUBLIC_URL: http://localhost:4180
+      # Издатель — адрес, видимый браузеру; ключи забираются изнутри сети напрямую
+      # у Keycloak. Разделение именно для этого случая и сделано.
+      # Изменяющие запросы принимаются только со страниц библиотеки: вторым рубежом
+      # к признаку SameSite у cookie сессии.
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:4180}
+      OIDC_ISSUER: http://localhost:8180/realms/bookcase
+      OIDC_JWK_SET_URI: http://keycloak:8080/realms/bookcase/protocol/openid-connect/certs
+      OIDC_AUDIENCE: bookcase-api
+      # Куда уходят трассы. Отправитель создаётся только при заданном адресе,
+      # поэтому запуск без Tempo — обычное дело, а не поломка.
+      MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: http://tempo:4318/v1/traces
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75
+    volumes:
+      - ../../services/catalog/build/libs:/app:ro
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8081"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 512M
+
+  storage:
+    profiles: ["services"]
+    image: eclipse-temurin:25-jre
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    command: ["sh", "-c", "exec java -jar /app/*.jar"]
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/storage
+      DB_USERNAME: storage
+      DB_PASSWORD: ${SERVICE_DB_PASSWORD}
+      S3_ENDPOINT: ${STORAGE_S3_ENDPOINT}
+      S3_ACCESS_KEY: ${STORAGE_S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${STORAGE_S3_SECRET_KEY}
+      DOWNLOAD_TOKEN_SECRET: ${DOWNLOAD_TOKEN_SECRET}
+      DOWNLOAD_TOKEN_TTL: ${DOWNLOAD_TOKEN_TTL}
+      KAFKA_BOOTSTRAP: kafka:9092
+      MAX_FILE_SIZE: ${MAX_FILE_SIZE}
+      # Изменяющие запросы принимаются только со страниц библиотеки: вторым рубежом
+      # к признаку SameSite у cookie сессии.
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:4180}
+      OIDC_ISSUER: http://localhost:8180/realms/bookcase
+      OIDC_JWK_SET_URI: http://keycloak:8080/realms/bookcase/protocol/openid-connect/certs
+      OIDC_AUDIENCE: bookcase-api
+      MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: http://tempo:4318/v1/traces
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75
+    volumes:
+      - ../../services/storage/build/libs:/app:ro
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8081"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          # Файлы идут потоком и в куче не оседают, поэтому предел скромный.
+          memory: 512M
+
+  ingester:
+    profiles: ["services"]
+    image: eclipse-temurin:25-jre
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    command: ["sh", "-c", "exec java -jar /app/*.jar"]
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/ingester
+      DB_USERNAME: ingester
+      DB_PASSWORD: ${SERVICE_DB_PASSWORD}
+      KAFKA_BOOTSTRAP: kafka:9092
+      STORAGE_URL: http://storage:8080
+      MAX_PARSE_SIZE: ${MAX_PARSE_SIZE}
+      # Изменяющие запросы принимаются только со страниц библиотеки: вторым рубежом
+      # к признаку SameSite у cookie сессии.
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:4180}
+      OIDC_ISSUER: http://localhost:8180/realms/bookcase
+      OIDC_JWK_SET_URI: http://keycloak:8080/realms/bookcase/protocol/openid-connect/certs
+      OIDC_AUDIENCE: bookcase-api
+      MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: http://tempo:4318/v1/traces
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75
+    volumes:
+      - ../../services/ingester/build/libs:/app:ro
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8081"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          # Разбор упирается в процессор, а файлы читаются потоком во временный
+          # файл — в куче они не оседают.
+          memory: 768M
+
+  enricher:
+    profiles: ["services"]
+    image: eclipse-temurin:25-jre
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    command: ["sh", "-c", "exec java -jar /app/*.jar"]
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/enricher
+      DB_USERNAME: enricher
+      DB_PASSWORD: ${SERVICE_DB_PASSWORD}
+      KAFKA_BOOTSTRAP: kafka:9092
+      # Единственный сервис, которому нужен выход наружу. Без ключа Google Books
+      # выключается сам и остаётся только Open Library — библиотека работает и так.
+      STORAGE_URL: http://storage:8080
+      # Служебная учётная запись: под ней уточнитель кладёт обложки в хранилище.
+      ENRICHER_CLIENT_ID: ${ENRICHER_CLIENT_ID:-bookcase-enricher}
+      ENRICHER_CLIENT_SECRET: ${ENRICHER_CLIENT_SECRET:-local-dev-enricher-secret}
+      OIDC_TOKEN_URI: http://keycloak:8080/realms/bookcase/protocol/openid-connect/token
+      GOOGLE_BOOKS_API_KEY: ${GOOGLE_BOOKS_API_KEY:-}
+      OPEN_LIBRARY_ENABLED: ${OPEN_LIBRARY_ENABLED:-true}
+      ENRICH_POLL_INTERVAL: ${ENRICH_POLL_INTERVAL:-30s}
+      ENRICH_BATCH_SIZE: ${ENRICH_BATCH_SIZE:-10}
+      # Изменяющие запросы принимаются только со страниц библиотеки: вторым рубежом
+      # к признаку SameSite у cookie сессии.
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:4180}
+      OIDC_ISSUER: http://localhost:8180/realms/bookcase
+      OIDC_JWK_SET_URI: http://keycloak:8080/realms/bookcase/protocol/openid-connect/certs
+      OIDC_AUDIENCE: bookcase-api
+      MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: http://tempo:4318/v1/traces
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75
+    volumes:
+      - ../../services/enricher/build/libs:/app:ro
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8081"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          # Работа лёгкая: ожидание ответов чужой службы и запись в свою базу.
+          memory: 512M
+
+  # ── Фронтенд ────────────────────────────────────────────────────────────────
+  # Статические страницы на nginx: разметка, один файл стилей и один скрипт.
+  # Вход и токены — забота шлюза, поэтому фронтенду не нужно знать о них ничего.
+  web:
+    image: nginx:1.29-alpine
+    volumes:
+      - ../../web:/usr/share/nginx/html:ro
+      - ../../web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      # Адрес именно 127.0.0.1: имя localhost в этом образе разрешается в IPv6,
+      # а nginx слушает IPv4 — проба получала бы отказ при исправном сервере.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          # Раздача десятка файлов: больше памяти nginx здесь просто нечем занять.
+          memory: 64M
+
+  # ── Наблюдаемость ───────────────────────────────────────────────────────────
+  # Сервисы отдают метрики на служебном порту 8081, отдельном от прикладного;
+  # пока сервисов нет, цели просто числятся недоступными — это ожидаемо.
+  prometheus:
+    image: prom/prometheus:v3.13.2
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # Стенду хватает недели истории; без предела база растёт, пока есть диск.
+      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.retention.size=2GB
+      - --web.enable-lifecycle
+      # Примеры: к делениям гистограмм прикрепляется идентификатор трассы того запроса,
+      # который в это деление попал. Без этого признака Prometheus их выбрасывает при сборе,
+      # и переход от всплеска на графике к самой трассе становится невозможен.
+      - --enable-feature=exemplar-storage
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  # Хранилище трасс. Сервисы на него не ссылаются через depends_on намеренно: сбор трасс
+  # не должен решать, поднимется приложение или нет. Tempo лежит — отправка молча
+  # не удаётся, книги при этом загружаются и ищутся как обычно.
+  tempo:
+    image: grafana/tempo:2.9.5
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    user: "0:0"
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      # Наружу открыт только порт запросов: приёмник трасс нужен изнутри сети стенда.
+      - "127.0.0.1:3200:3200"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3200/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  grafana:
+    image: grafana/grafana:13.0.6
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:?скопируйте .env.example в .env}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?скопируйте .env.example в .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      # Один и тот же набор дашбордов и на стенде, и в кластере: они лежат
+      # в репозитории, а не в базе Grafana, и правятся как обычные файлы.
+      # Путь ведёт внутрь чарта намеренно: Helm умеет читать файлы только из
+      # своего каталога, поэтому единственное место для них — там, а стенд
+      # подключает те же файлы, а не их копию.
+      - ../helm/platform/files/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 384M
+
+volumes:
+  postgres-data:
+  kafka-data:
+  seaweedfs-data:
+  prometheus-data:
+  grafana-data:
+  tempo-data:

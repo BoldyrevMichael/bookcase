@@ -1,0 +1,15 @@
+apiVersion: 1
+
+# Дашборды лежат файлами в репозитории и подключаются отсюда: правка через интерфейс
+# Grafana осталась бы только в её базе и пропала бы при пересоздании стенда.
+providers:
+  - name: bookcase
+    orgId: 1
+    folder: bookcase
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
