@@ -1,0 +1,130 @@
+{{- if .Values.network.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "service.name" . }}
+  labels:
+    {{- include "service.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "service.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Кто вправе обращаться к сервису. Перечисление вместо «всем внутри кластера»:
+    # библиотека личная, и лишний путь к данным здесь ни к чему.
+    {{- range .Values.network.allowFrom }}
+    - from:
+        {{- if eq . "gateway" }}
+        # Шлюз живёт в своём пространстве имён, поэтому отбор идёт по его метке.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Values.network.gatewayNamespace }}
+        {{- else }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ . }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ $.Values.ports.api }}
+    {{- end }}
+    # Сбор метрик: Prometheus ходит на служебный порт, и без этого правила
+    # наблюдаемость молча перестанет работать.
+    {{- if .Values.ports.management }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.network.monitoringNamespace }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.ports.management }}
+    {{- end }}
+  egress:
+    # Разрешения на исходящие. Разбиты по назначению, чтобы по манифесту было
+    # видно, с кем сервис вообще разговаривает.
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- if .Values.network.toDatabase }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+      ports:
+        - protocol: TCP
+          port: 5432
+    {{- end }}
+    {{- if .Values.network.toKafka }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kafka
+      ports:
+        - protocol: TCP
+          port: 9092
+    {{- end }}
+    {{- if .Values.network.toKeycloak }}
+    # Ключи, которыми подписаны токены, сервис забирает сам: проверять подпись
+    # он обязан своими силами, и без этого пути любой запрос кончается отказом.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: keycloakx
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8443
+    {{- end }}
+    {{- if .Values.network.toTempo }}
+    # Трассы. Отдельным правилом, а не в общем списке: их отправляют все сервисы,
+    # и повторять это в каждом файле значений незачем.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tempo
+      ports:
+        - protocol: TCP
+          port: 4318
+    {{- end }}
+    {{- range .Values.network.allowTo }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .service }}
+      ports:
+        - protocol: TCP
+          port: {{ .port }}
+    {{- end }}
+    {{- if .Values.network.allowExternal }}
+    # Выход в интернет. Он есть ровно у одного сервиса — уточнителя, и только потому,
+    # что за метаданными книг больше сходить некуда. Наружу — значит наружу, а не
+    # «куда угодно, включая соседей», поэтому подсети самого кластера исключены.
+    #
+    # Исключать все приватные диапазоны разом нельзя, хотя соблазн есть: наружу трафик
+    # уходит через шлюз узла, а он тоже сидит в приватной подсети — и выход пропадает
+    # целиком. Здесь перечислены ровно подсети подов и служб.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              {{- range .Values.network.clusterCidrs }}
+              - {{ . }}
+              {{- end }}
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80
+    {{- end }}
+{{- end }}

@@ -1,0 +1,33 @@
+# Общее для всех сервисов. Подключается первым файлом (`-f common.yaml -f catalog.yaml`):
+# Helm сливает значения слева направо, поэтому повторять это пять раз не приходится.
+
+image:
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+replicas: 1
+
+env:
+  # Изменяющие запросы принимаются только со страниц библиотеки: вторым рубежом
+  # к признаку SameSite у cookie сессии. Значение подставляет install.sh — оно
+  # совпадает с внешним адресом.
+  ALLOWED_ORIGINS: http://localhost:8080
+  # Издатель токенов — внешний адрес: именно он записан в самих токенах. Ключи же
+  # забираются по внутреннему адресу, чтобы за ними не ходить наружу через шлюз.
+  OIDC_ISSUER: http://localhost:8080/realms/bookcase
+  OIDC_JWK_SET_URI: http://platform-keycloakx-http/realms/bookcase/protocol/openid-connect/certs
+  OIDC_AUDIENCE: bookcase-api
+  KAFKA_BOOTSTRAP: bookcase-kafka-kafka-bootstrap:9092
+  # Журнал в машиночитаемом виде: в кластере записи читает сборщик, а не человек.
+  # На своей машине переменная не задаётся, и вывод остаётся обычным текстом.
+  LOG_FORMAT: ecs
+  # Куда уходят трассы. Задаётся здесь, а не в настройках сервиса: отправитель
+  # создаётся только при заданном адресе, поэтому запуск без Tempo (среда разработки,
+  # проверки) остаётся обычным делом, а не поломкой.
+  MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: http://platform-tempo:4318/v1/traces
+
+envFromSecret:
+  DB_PASSWORD:
+    # Пароль роли создаёт оператор базы, по секрету на роль.
+    secret: bookcase-db-catalog
+    key: password

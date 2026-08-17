@@ -1,0 +1,81 @@
+{{- if .Values.kafka.enabled }}
+# Очередь под управлением оператора Strimzi. Начиная с версии 0.46 Strimzi ведёт Kafka
+# только в режиме KRaft — без ZooKeeper, — и роли узлов описываются отдельным объектом.
+#
+# Версия описаний — kafka.strimzi.io/v1: в Strimzi 1.x прежняя v1beta2 больше не
+# обслуживается, и объект с ней кластер просто не принимает.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: {{ .Values.kafka.name }}-nodes
+  labels:
+    strimzi.io/cluster: {{ .Values.kafka.name }}
+spec:
+  replicas: {{ .Values.kafka.replicas }}
+  roles:
+    # Один узел совмещает обе роли: на стенде отдельный контроллер занял бы ещё
+    # столько же памяти, ничего не добавив к проверке работы.
+    - controller
+    - broker
+  storage:
+    type: persistent-claim
+    size: {{ .Values.kafka.storage }}
+    deleteClaim: true
+  resources:
+    {{- toYaml .Values.kafka.resources | nindent 4 }}
+  jvmOptions:
+    # Куча задаётся явно, а не долей от памяти узла: делить память между соседями
+    # должен человек, а не случай.
+    -Xms: {{ .Values.kafka.heap.min }}
+    -Xmx: {{ .Values.kafka.heap.max }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: {{ .Values.kafka.name }}
+  annotations:
+    strimzi.io/node-pools: enabled
+    strimzi.io/kraft: enabled
+spec:
+  kafka:
+    version: {{ .Values.kafka.version | quote }}
+    # В кавычках: «4.0» без них разбирается как число, и объект отвергается.
+    metadataVersion: {{ .Values.kafka.metadataVersion | quote }}
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+    config:
+      # Одна копия на стенде: реплицировать не на что, узел один.
+      offsets.topic.replication.factor: 1
+      transaction.state.log.replication.factor: 1
+      transaction.state.log.min.isr: 1
+      default.replication.factor: 1
+      min.insync.replicas: 1
+      # Топики заводятся явно, объектами ниже: опечатка в имени должна кончаться
+      # молчанием потребителя, которое видно, а не тихо созданным топиком.
+      auto.create.topics.enable: false
+  entityOperator:
+    # Часть оператора, которая следит за объектами топиков и приводит настоящие
+    # топики к описанному виду.
+    topicOperator:
+      resources:
+        {{- toYaml .Values.kafka.topicOperatorResources | nindent 8 }}
+{{- range .Values.kafka.topics }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: {{ .name }}
+  labels:
+    strimzi.io/cluster: {{ $.Values.kafka.name }}
+spec:
+  # Число разделов выбирается один раз наперёд: потребителей не может быть больше,
+  # чем разделов, а их увеличение ломает порядок событий внутри ключа.
+  partitions: {{ .partitions }}
+  replicas: 1
+  config:
+    retention.ms: {{ .retentionMs }}
+{{- end }}
+{{- end }}

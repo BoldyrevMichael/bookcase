@@ -1,0 +1,38 @@
+{{- if and .Values.gateway.enabled (index .Values "oauth2-proxy" "enabled") }}
+# Единственный маршрут снаружи — на шлюз входа. Дальше он сам решает, кому передать
+# запрос: список адресов сервисов у него в настройках.
+#
+# Маршрутизировать сразу на сервисы было бы проще, но тогда вход перестал бы быть
+# обязательным: страницы открывались бы без него, а сессии не появлялось бы вовсе.
+# Точка входа должна быть одна, и она же держит сессию.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: bookcase
+spec:
+  parentRefs:
+    - name: {{ .Values.gateway.name }}
+  rules:
+    # Страницы входа и выдача токенов — на Keycloak. Он снаружи нужен: браузер сам
+    # ходит на форму входа, а издатель в токене — это адрес, по которому его выдали,
+    # и он обязан совпадать с тем, что проверяют сервисы. Отдельного адреса для него
+    # заводить не за чем: вход в библиотеку один.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /realms
+        - path:
+            type: PathPrefix
+            value: /resources
+      backendRefs:
+        - name: platform-keycloakx-http
+          port: 80
+    # Всё остальное — шлюзу входа, который решает, пускать ли дальше.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: platform-oauth2-proxy
+          port: 80
+{{- end }}

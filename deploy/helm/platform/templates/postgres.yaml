@@ -1,0 +1,93 @@
+{{- if .Values.postgresql.enabled }}
+# База под управлением оператора CloudNativePG. Оператор описывает базу как желаемое
+# состояние: сколько копий, какая версия, кто владелец каждой базы данных, — а дальше
+# сам поднимает, переключает при отказе и обновляет.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Values.postgresql.name }}
+spec:
+  instances: {{ .Values.postgresql.instances }}
+  imageName: {{ .Values.postgresql.image }}
+
+  # Пределы у базы обязательны так же, как у сервисов: без них она считает своей
+  # всю память узла и утягивает за собой соседей при первом же тяжёлом запросе.
+  resources:
+    {{- toYaml .Values.postgresql.resources | nindent 4 }}
+
+  postgresql:
+    parameters:
+      max_connections: "100"
+      shared_buffers: 128MB
+      work_mem: 8MB
+
+  storage:
+    size: {{ .Values.postgresql.storage }}
+
+  bootstrap:
+    initdb:
+      # Одна база на сервис — не прихоть: сервис не может заглянуть в чужие таблицы
+      # даже по ошибке, а перенос базы в отдельный экземпляр сводится к смене адреса.
+      # Здесь заводится первая, остальные описаны ниже отдельными объектами.
+      database: catalog
+      owner: catalog
+      secret:
+        name: bookcase-db-catalog
+      # Раскладка символов — с Unicode, а не C (оператор ставит C по умолчанию).
+      # Без этого Postgres не приводит кириллицу к нижнему регистру, и поиск по
+      # словам становится чувствительным к регистру: «Проверочная» в названии
+      # и «проверочная» в запросе дают разные основы слов и не совпадают.
+      # На стенде с compose база заводится с UTF-8 и такого расхождения не видно.
+      #
+      # Порядок сортировки оставлен побайтовым (C.UTF-8): выдача упорядочена по
+      # совпадению и дате, а не по алфавиту, и правила сравнения строк здесь
+      # ничего не решают — зато они не зависят от версии библиотеки языка.
+      localeCollate: C.UTF-8
+      localeCType: C.UTF-8
+
+  managed:
+    roles:
+      {{- range .Values.postgresql.databases }}
+      - name: {{ .name }}
+        ensure: present
+        login: true
+        passwordSecret:
+          name: bookcase-db-{{ .name }}
+      {{- end }}
+{{- range .Values.postgresql.databases }}
+{{- if ne .name "catalog" }}
+---
+# Остальные базы описываются отдельно: оператор умеет заводить их декларативно,
+# и создание вручную «на месте» здесь не нужно.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: {{ $.Values.postgresql.name }}-{{ .name }}
+spec:
+  name: {{ .name }}
+  owner: {{ .name }}
+  cluster:
+    name: {{ $.Values.postgresql.name }}
+{{- if .extensions }}
+  extensions:
+    {{- range .extensions }}
+    - name: {{ . }}
+      ensure: present
+    {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- range .Values.postgresql.databases }}
+---
+# Пароль роли. На стенде он один и тот же для всех, из общего значения; в настоящем
+# окружении секреты приезжают снаружи, а чарт лишь ссылается на них по имени.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bookcase-db-{{ .name }}
+type: kubernetes.io/basic-auth
+stringData:
+  username: {{ .name }}
+  password: {{ $.Values.secrets.servicePassword | quote }}
+{{- end }}
+{{- end }}

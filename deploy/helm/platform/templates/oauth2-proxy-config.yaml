@@ -1,0 +1,12 @@
+{{- if index .Values "oauth2-proxy" "enabled" }}
+# Настройки шлюза входа. Учётных данных здесь нет: их чарт берёт из отдельного секрета
+# и передаёт переменными окружения — так они не попадают в карту настроек, которую
+# видно обычным просмотром ресурсов.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bookcase-bff-config
+data:
+  oauth2_proxy.cfg: |
+{{ tpl (.Files.Get "files/oauth2-proxy.cfg") . | indent 4 }}
+{{- end }}

@@ -1,0 +1,7 @@
+databaseChangeLog:
+  - include:
+      file: db/changelog/001-book.sql
+  - include:
+      file: db/changelog/002-export.sql
+  - include:
+      file: db/changelog/003-cover.sql

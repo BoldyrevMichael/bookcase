@@ -1,0 +1,7 @@
+databaseChangeLog:
+  - include:
+      file: db/changelog/001-stored-file.sql
+  - include:
+      file: db/changelog/002-cover.sql
+  - include:
+      file: db/changelog/003-cover-reference.sql

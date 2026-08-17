@@ -1,0 +1,27 @@
+# Сбор метрик со стенда. Сервисы отдают их на служебном порту 8081, отдельном
+# от прикладного: наружу этот порт не публикуется никогда.
+# Пока сервисы не подняты, их цели числятся недоступными — так и должно быть.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: local
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: bookcase
+    metrics_path: /actuator/prometheus
+    # Метку service приписывает не сбор, а сам сервис (общая метка Micrometer):
+    # в кластере цели находятся сами, и приписать её там негде — а дашборд один
+    # на оба места.
+    static_configs:
+      - targets: ["catalog:8081", "storage:8081", "ingester:8081", "enricher:8081"]
+
+  - job_name: keycloak
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["keycloak:9000"]

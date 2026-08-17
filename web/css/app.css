@@ -1,0 +1,506 @@
+/*
+ * Один файл стилей на все страницы. Сборки нет намеренно: у библиотеки пять страниц,
+ * и любой сборщик здесь стоил бы больше, чем весит сам код.
+ *
+ * Цвета вынесены в переменные и переключаются по настройке системы: одна и та же вёрстка
+ * работает и в светлой, и в тёмной теме, а выбирать за пользователя не приходится.
+ */
+
+:root {
+    --bg: #f7f6f3;
+    --surface: #ffffff;
+    --border: #e0ddd6;
+    --text: #23201c;
+    --muted: #6d6862;
+    --accent: #7a5c3e;
+    --accent-text: #ffffff;
+    --danger: #a03030;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+    --radius: 6px;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #1b1917;
+        --surface: #242120;
+        --border: #38332f;
+        --text: #ece7e0;
+        --muted: #a09990;
+        --accent: #c29a6e;
+        --accent-text: #1b1917;
+        --danger: #d97070;
+        --shadow: none;
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+a {
+    color: inherit;
+}
+
+/* ── Шапка ──────────────────────────────────────────────────────────────── */
+
+header.top {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 12px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+}
+
+header.top .brand {
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-decoration: none;
+}
+
+header.top nav {
+    display: flex;
+    gap: 16px;
+    flex: 1;
+}
+
+header.top nav a {
+    color: var(--muted);
+    text-decoration: none;
+    padding: 4px 0;
+    border-bottom: 2px solid transparent;
+}
+
+header.top nav a:hover {
+    color: var(--text);
+}
+
+header.top nav a[aria-current="page"] {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+}
+
+header.top .who {
+    color: var(--muted);
+    font-size: 14px;
+}
+
+main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 24px;
+}
+
+h1 {
+    font-size: 22px;
+    margin: 0 0 20px;
+}
+
+h2 {
+    font-size: 17px;
+    margin: 24px 0 12px;
+}
+
+/* ── Поля и кнопки ──────────────────────────────────────────────────────── */
+
+input,
+select,
+textarea,
+button {
+    font: inherit;
+    color: inherit;
+}
+
+input[type="text"],
+input[type="search"],
+input[type="number"],
+select,
+textarea {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 7px 10px;
+    width: 100%;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+button {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 7px 14px;
+    cursor: pointer;
+}
+
+button:hover {
+    border-color: var(--accent);
+}
+
+button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
+}
+
+button.quiet {
+    border-color: transparent;
+    color: var(--muted);
+    padding: 4px 8px;
+}
+
+button.danger {
+    color: var(--danger);
+}
+
+label.field {
+    display: block;
+    margin-bottom: 12px;
+}
+
+label.field span {
+    display: block;
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 4px;
+}
+
+/* ── Раскладка каталога ─────────────────────────────────────────────────── */
+
+.layout {
+    display: grid;
+    grid-template-columns: 230px 1fr;
+    gap: 24px;
+    align-items: start;
+}
+
+@media (max-width: 800px) {
+    .layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+aside.filters {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    position: sticky;
+    top: 76px;
+}
+
+aside.filters h2:first-child {
+    margin-top: 0;
+}
+
+.facet {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 3px 0;
+    color: var(--muted);
+    cursor: pointer;
+    background: none;
+    border: none;
+    width: 100%;
+    text-align: left;
+}
+
+.facet:hover {
+    color: var(--text);
+}
+
+.facet[aria-pressed="true"] {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.facet .count {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Книги ──────────────────────────────────────────────────────────────── */
+
+.books {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 18px;
+}
+
+.book {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    text-decoration: none;
+}
+
+.book:hover {
+    border-color: var(--accent);
+}
+
+.book .cover {
+    aspect-ratio: 2 / 3;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.book .cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* Обложки нет — показываем формат, а не пустое место и не выдуманную картинку. */
+.book .cover .format {
+    color: var(--muted);
+    font-size: 13px;
+    letter-spacing: 0.08em;
+}
+
+.book .about {
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+}
+
+.book .title {
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.book .authors,
+.book .year {
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.badge {
+    display: inline-block;
+    font-size: 12px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+}
+
+.badge.review {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* ── Карточка книги ─────────────────────────────────────────────────────── */
+
+.card {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: 28px;
+    align-items: start;
+}
+
+@media (max-width: 800px) {
+    .card {
+        grid-template-columns: 1fr;
+    }
+}
+
+.card .cover {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    aspect-ratio: 2 / 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.card .cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+dl.props {
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    gap: 8px 16px;
+    margin: 0 0 20px;
+}
+
+dl.props dt {
+    color: var(--muted);
+}
+
+dl.props dd {
+    margin: 0;
+}
+
+/* Откуда взялось значение поля — видно прямо в карточке: это обещание системы. */
+.source {
+    font-size: 11px;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0 6px;
+    margin-left: 8px;
+    white-space: nowrap;
+}
+
+.row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.chips {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.chip {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2px 10px;
+    font-size: 13px;
+    background: var(--surface);
+}
+
+/* ── Списки, сообщения, состояния ───────────────────────────────────────── */
+
+.panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+table.list {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+table.list th,
+table.list td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+}
+
+table.list th {
+    color: var(--muted);
+    font-weight: 500;
+    font-size: 13px;
+}
+
+.note {
+    color: var(--muted);
+}
+
+.error {
+    color: var(--danger);
+}
+
+.empty {
+    color: var(--muted);
+    padding: 40px 0;
+    text-align: center;
+}
+
+.progress {
+    height: 6px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.progress > div {
+    height: 100%;
+    background: var(--accent);
+    width: 0;
+    transition: width 0.2s;
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* Подпись поля, которую не видно, но которую читает программа чтения с экрана.
+ * Совсем без подписи поле остаётся безымянным: подсказка внутри (placeholder)
+ * исчезает при первом же символе и подписью не считается. display: none тут
+ * не годится — так подпись пропадёт и для чтения тоже. */
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+/* ── Мелкие правки раскладки ─────────────────────────────────────────────────
+ * Классы вместо атрибута style в разметке. Дело не в опрятности: строгая политика
+ * содержимого страниц запрещает и встроенные стили тоже, а ослаблять её ради
+ * десятка отступов означало бы потерять и защиту от чужих скриптов.
+ */
+
+.tight { margin-top: 0; }
+.pull-up { margin-top: -10px; }
+.gap-sm { margin-top: 8px; }
+.gap { margin-top: 14px; }
+.gap-lg { margin-top: 16px; }
+.gap-xl { margin-top: 32px; }
+.below { margin-bottom: 14px; }
+.hint { margin: 10px 0 0; }
+.form-error { margin: 8px 0 0; }
+.grow { flex: 1; }
+.search-field { flex: 1; min-width: 240px; }
+.auto-width { width: auto; }
+.centered { justify-content: center; margin-top: 24px; }
+
+.col-state { width: 180px; }
+.col-count { width: 120px; }
+.col-actions { width: 200px; }
+.col-result { width: 34%; }
+
+/* Область, куда перетаскивают файлы. */
+.dropzone {
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    margin-top: 14px;
+}
+
+.dropzone.over {
+    border-color: var(--accent);
+}

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0">
+  <description>
+    <title-info>
+      <genre>sci_cs</genre>
+      <author>
+        <first-name>Иван</first-name>
+        <last-name>Петров</last-name>
+      </author>
+      <book-title>Проверочная книга для коллекции запросов</book-title>
+      <date>2026</date>
+      <lang>ru</lang>
+    </title-info>
+    <publish-info>
+      <publisher>Издательство стенда</publisher>
+      <year>2026</year>
+      <isbn>978-5-0000-0000-7</isbn>
+    </publish-info>
+  </description>
+  <body>
+    <section>
+      <title><p>Единственная глава</p></title>
+      <p>Содержимое здесь неважно: коллекция проверяет путь книги через систему,
+         а не качество литературы. Важно, что это настоящий FB2 — формат
+         определяется по содержимому, а не по расширению.</p>
+    </section>
+  </body>
+</FictionBook>

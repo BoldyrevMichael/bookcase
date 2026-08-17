@@ -1,0 +1,53 @@
+## Единственное место, где записаны версии.
+## Всё, чем управляет спецификация зависимостей Spring Boot, здесь не дублируется:
+## Kafka, JUnit, AssertJ, Testcontainers, Liquibase, драйвер PostgreSQL и Micrometer
+## приходят согласованным набором из неё.
+
+[versions]
+java = "25"
+springBoot = "4.1.0"
+lombok = "1.18.46"
+awsSdk = "2.52.1"
+pdfbox = "3.0.8"
+icu4j = "78.3"
+resilience4j = "2.4.0"
+
+checkstyle = "13.10.0"
+spotbugs = "4.10.3"
+findsecbugs = "1.14.0"
+jacoco = "0.8.15"
+googleJavaFormat = "1.36.1"
+
+spotbugsPlugin = "6.5.10"
+cyclonedxPlugin = "3.4.1"
+spotlessPlugin = "8.9.0"
+sonarqubePlugin = "7.4.0.8496"
+
+[libraries]
+lombok = { module = "org.projectlombok:lombok", version.ref = "lombok" }
+findsecbugs = { module = "com.h3xstream.findsecbugs:findsecbugs-plugin", version.ref = "findsecbugs" }
+spotbugsAnnotations = { module = "com.github.spotbugs:spotbugs-annotations", version.ref = "spotbugs" }
+
+springBootDependencies = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "springBoot" }
+awsSdkBom = { module = "software.amazon.awssdk:bom", version.ref = "awsSdk" }
+# Разбор PDF и определение кодировки текста. Всё остальное разбирается своими
+# средствами: EPUB и FB2 — это zip и XML, для них хватает того, что есть в JDK.
+pdfbox = { module = "org.apache.pdfbox:pdfbox", version.ref = "pdfbox" }
+icu4j = { module = "com.ibm.icu:icu4j", version.ref = "icu4j" }
+# Предохранитель и ограничитель скорости для походов во внешние справочники.
+# На Boot 4 стартер называется resilience4j-spring-boot4: вариант boot3 подключается,
+# но его автонастройка молча не срабатывает.
+resilience4j = { module = "io.github.resilience4j:resilience4j-spring-boot4", version.ref = "resilience4j" }
+
+# Плагины, подключаемые внутри build-logic как обычные зависимости.
+springBootPlugin = { module = "org.springframework.boot:spring-boot-gradle-plugin", version.ref = "springBoot" }
+spotbugsPlugin = { module = "com.github.spotbugs.snom:spotbugs-gradle-plugin", version.ref = "spotbugsPlugin" }
+cyclonedxPlugin = { module = "org.cyclonedx:cyclonedx-gradle-plugin", version.ref = "cyclonedxPlugin" }
+spotlessPlugin = { module = "com.diffplug.spotless:spotless-plugin-gradle", version.ref = "spotlessPlugin" }
+
+[plugins]
+springBoot = { id = "org.springframework.boot", version.ref = "springBoot" }
+spotbugs = { id = "com.github.spotbugs", version.ref = "spotbugsPlugin" }
+cyclonedx = { id = "org.cyclonedx.bom", version.ref = "cyclonedxPlugin" }
+spotless = { id = "com.diffplug.spotless", version.ref = "spotlessPlugin" }
+sonarqube = { id = "org.sonarqube", version.ref = "sonarqubePlugin" }

@@ -1,0 +1,24 @@
+dependencies:
+- name: valkey
+  repository: https://valkey.io/valkey-helm/
+  version: 0.11.0
+- name: keycloakx
+  repository: https://codecentric.github.io/helm-charts
+  version: 7.2.2
+- name: oauth2-proxy
+  repository: https://oauth2-proxy.github.io/manifests
+  version: 10.7.0
+- name: seaweedfs
+  repository: https://seaweedfs.github.io/seaweedfs/helm
+  version: 4.41.0
+- name: prometheus
+  repository: https://prometheus-community.github.io/helm-charts
+  version: 29.24.0
+- name: grafana
+  repository: https://grafana.github.io/helm-charts
+  version: 10.5.15
+- name: tempo
+  repository: https://grafana.github.io/helm-charts
+  version: 1.24.4
+digest: sha256:628fe89cd1183949d675c329550cfc4e001d967555b888fe762c6163cf6a9573
+generated: "2026-08-17T02:45:03.611217117+02:00"

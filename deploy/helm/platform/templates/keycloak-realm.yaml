@@ -1,0 +1,18 @@
+{{- if index .Values "keycloakx" "enabled" }}
+# Описание realm целиком: клиенты, роли, пользователи стенда и русская локаль.
+# Keycloak применяет его при первом запуске, поэтому правки realm видны только
+# после пересоздания — ровно как и на стенде с compose.
+#
+# Секрет, а не карта настроек: в описании realm лежат секреты клиентов и пароли
+# пользователей стенда. Kubernetes раздаёт и то и другое одинаково, но карта
+# настроек читается всеми, кому вообще разрешено смотреть в пространство имён,
+# а к секретам права выдаются отдельно.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bookcase-realm
+type: Opaque
+stringData:
+  bookcase-realm.json: |
+{{ tpl (.Files.Get "files/bookcase-realm.json") . | indent 4 }}
+{{- end }}

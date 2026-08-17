@@ -1,0 +1,782 @@
+{
+  "info": {
+    "name": "bookcase",
+    "description": "Путь книги через систему целиком — от загрузки файла до скачивания под аккуратным именем — и отрицательные проверки: чужая книга, просроченный токен, токен, выписанный другому получателю, и запрос без токена.\n\nЗапуск на стенде:\n    docker compose -f deploy/compose/compose.yaml --profile services up -d\n    newman run docs/postman/bookcase.postman_collection.json \\\n        -e docs/postman/local.postman_environment.json --working-dir docs/postman\n\nУчётные записи и клиенты берутся из описания realm (deploy/compose/keycloak/import): bookcase-test выдаёт обычный токен, bookcase-foreign — токен без нужного получателя, bookcase-expiring — токен со сроком жизни в одну секунду.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Вход",
+      "item": [
+        {
+          "name": "Токен читателя",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "description": "Обмен логина на токен напрямую. В рабочем окружении такого клиента нет: браузер ходит через шлюз входа, а программные клиенты получают токен своим способом.",
+            "url": "{{keycloakUrl}}/realms/bookcase/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "bookcase-test"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{testClientSecret}}"
+                },
+                {
+                  "key": "username",
+                  "value": "{{reader}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{readerPassword}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"токен выдан\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set(\"token\", body.access_token);",
+                  "pm.test(\"это токен доступа\", () => pm.expect(body.token_type.toLowerCase()).to.eql(\"bearer\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Кто я",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "description": "Сервис разбирает токен сам: подпись, издателя, получателя и срок. Ответ показывает, кем система считает обратившегося.",
+            "url": "{{baseUrl}}/api/v1/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"владелец определён\", () => pm.expect(pm.response.json().id).to.be.a(\"string\").and.not.empty);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Путь книги",
+      "item": [
+        {
+          "name": "Загрузка файла",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/files",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "sample-book.fb2"
+                }
+              ]
+            },
+            "description": "Файл кладётся как есть. Владелец берётся из токена, а не из запроса; повторная загрузка того же содержимого второго объекта не создаёт."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"201\", () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"хэш содержимого посчитан\", () => pm.expect(body.sha256).to.match(/^[0-9a-f]{64}$/));",
+                  "pm.collectionVariables.set(\"sha256\", body.sha256);",
+                  "pm.collectionVariables.set(\"sizeBytes\", body.sizeBytes);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Просьба разобрать",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Разбор идёт своим ходом: ответ приходит сразу с 202 и адресом задачи.",
+            "url": "{{baseUrl}}/api/v1/ingestions",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"sha256\": \"{{sha256}}\",\n    \"originalName\": \"Петров И. - Проверочная книга.fb2\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"202\", () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set(\"taskId\", body.id);",
+                  "pm.test(\"задача заведена\", () => pm.expect(body.status).to.be.oneOf([\"QUEUED\", \"RUNNING\", \"SUCCEEDED\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Состояние разбора",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "description": "Опрос до готовности. Разбор занимает секунды: файл нужно забрать из хранилища, определить формат по содержимому и вынуть метаданные.",
+            "url": "{{baseUrl}}/api/v1/ingestions/{{taskId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.response.to.have.status(200));",
+                  "const task = pm.response.json();",
+                  "const attempt = Number(pm.collectionVariables.get(\"attempt\") || 0) + 1;",
+                  "if (task.status === \"QUEUED\" || task.status === \"RUNNING\") {",
+                  "    pm.test(\"разбор ещё идёт, ждём\", () => pm.expect(attempt).to.be.below(30));",
+                  "    pm.collectionVariables.set(\"attempt\", attempt);",
+                  "    const until = Date.now() + 1000;",
+                  "    while (Date.now() < until) { /* пауза между опросами */ }",
+                  "    pm.execution.setNextRequest(\"Состояние разбора\");",
+                  "} else {",
+                  "    pm.collectionVariables.unset(\"attempt\");",
+                  "    pm.test(\"разбор удался\", () => pm.expect(task.status).to.eql(\"SUCCEEDED\"));",
+                  "    pm.test(\"название вынуто из файла\", () =>",
+                  "        pm.expect(task.metadata.title).to.eql(\"Проверочная книга для коллекции запросов\"));",
+                  "    pm.test(\"автор приведён к общему виду\", () =>",
+                  "        pm.expect(task.metadata.authors).to.include(\"Петров И.\"));",
+                  "    pm.collectionVariables.set(\"title\", task.metadata.title);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Поиск по библиотеке",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "description": "Поиск идёт по словам с учётом опечаток; здесь он же служит проверкой, что карточка появилась в каталоге.",
+            "url": "{{baseUrl}}/api/v1/books?q=проверочная"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.response.to.have.status(200));",
+                  "const page = pm.response.json();",
+                  "// Отбор по хэшу, а не по названию: одинаковых названий в библиотеке может быть сколько угодно,",
+                  "// а содержимое, которое мы только что загрузили, ровно одно.",
+                  "const found = page.items.filter(book => book.sha256 === pm.collectionVariables.get(\"sha256\"));",
+                  "const attempt = Number(pm.collectionVariables.get(\"searchAttempt\") || 0) + 1;",
+                  "if (found.length === 0) {",
+                  "    pm.test(\"карточка ещё не доехала, ждём\", () => pm.expect(attempt).to.be.below(30));",
+                  "    pm.collectionVariables.set(\"searchAttempt\", attempt);",
+                  "    const until = Date.now() + 1000;",
+                  "    while (Date.now() < until) { /* карточку заводит другой сервис, по событию */ }",
+                  "    pm.execution.setNextRequest(\"Поиск по библиотеке\");",
+                  "} else {",
+                  "    pm.collectionVariables.unset(\"searchAttempt\");",
+                  "    pm.collectionVariables.set(\"bookId\", found[0].id);",
+                  "    pm.test(\"найдена по слову из названия\", () =>",
+                  "        pm.expect(found[0].title).to.eql(pm.collectionVariables.get(\"title\")));",
+                  "    pm.test(\"в выдаче есть разделы отбора\", () => pm.expect(page.facets).to.be.an(\"object\"));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Карточка книги",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "description": "Всё, что известно о книге, вместе с источником каждого поля: правка руками и то, что вынуто из файла, различаются.",
+            "url": "{{baseUrl}}/api/v1/books/{{bookId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.response.to.have.status(200));",
+                  "const card = pm.response.json();",
+                  "pm.test(\"это наша книга\", () => pm.expect(card.title).to.eql(pm.collectionVariables.get(\"title\")));",
+                  "pm.test(\"год взят из файла\", () => pm.expect(card.year).to.eql(2026));",
+                  "pm.test(\"источник поля записан\", () => pm.expect(card.sources.title).to.eql(\"EMBEDDED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Правка карточки",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Правка руками старше всего остального: уточнение по справочникам её не перепишет.",
+            "url": "{{baseUrl}}/api/v1/books/{{bookId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"series\": \"Проверочная серия\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.response.to.have.status(200));",
+                  "const card = pm.response.json();",
+                  "pm.test(\"серия записана\", () => pm.expect(card.series).to.eql(\"Проверочная серия\"));",
+                  "pm.test(\"источник поля — владелец\", () => pm.expect(card.sources.series).to.eql(\"USER\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Полка",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "description": "Полка — состояние чтения; значение у книги ровно одно.",
+            "url": "{{baseUrl}}/api/v1/books/{{bookId}}/shelf?value=READING"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"книга на полке «читаю»\", () => pm.expect(pm.response.json().shelf).to.eql(\"READING\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ссылка на скачивание",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "description": "Имя файла собирается по нынешней схеме именования, а сама ссылка живёт минуту и содержит подписанный пропуск: по ней можно скачать книгу без заголовка с токеном.",
+            "url": "{{baseUrl}}/api/v1/books/{{bookId}}/download"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.response.to.have.status(200));",
+                  "const link = pm.response.json();",
+                  "pm.test(\"имя собрано по схеме «автор - серия - название (год)»\", () =>",
+                  "    pm.expect(link.fileName).to.eql(",
+                  "        \"Петров И. - Проверочная серия - Проверочная книга для коллекции запросов (2026).fb2\"));",
+                  "pm.test(\"у ссылки есть срок\", () => pm.expect(link.expiresAt).to.be.a(\"string\"));",
+                  "pm.collectionVariables.set(\"downloadUrl\", link.url);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Скачивание по ссылке",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "Заголовка с токеном здесь нет намеренно: право даёт сам пропуск в адресе. Сервис проверяет его подпись, срок и то, на какой файл он выписан.",
+            "url": "{{downloadUrl}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"байты те же, что загружали\", () =>",
+                  "    pm.expect(pm.response.responseSize).to.eql(Number(pm.collectionVariables.get(\"sizeBytes\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Выгрузка библиотеки",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "description": "Архив собирается в фоне: ответ приходит сразу, готовность проверяется опросом.",
+            "url": "{{baseUrl}}/api/v1/exports"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"202\", () => pm.response.to.have.status(202));",
+                  "pm.collectionVariables.set(\"exportId\", pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Состояние выгрузки",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "description": "Опрос до готовности архива.",
+            "url": "{{baseUrl}}/api/v1/exports/{{exportId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200\", () => pm.response.to.have.status(200));",
+                  "const task = pm.response.json();",
+                  "const attempt = Number(pm.collectionVariables.get(\"exportAttempt\") || 0) + 1;",
+                  "if (task.status === \"QUEUED\" || task.status === \"RUNNING\") {",
+                  "    pm.test(\"архив ещё собирается, ждём\", () => pm.expect(attempt).to.be.below(60));",
+                  "    pm.collectionVariables.set(\"exportAttempt\", attempt);",
+                  "    const until = Date.now() + 1000;",
+                  "    while (Date.now() < until) { /* пауза между опросами */ }",
+                  "    pm.execution.setNextRequest(\"Состояние выгрузки\");",
+                  "} else {",
+                  "    pm.collectionVariables.unset(\"exportAttempt\");",
+                  "    pm.test(\"архив собран\", () => pm.expect(task.status).to.eql(\"SUCCEEDED\"));",
+                  "    pm.test(\"в архиве есть книги\", () => pm.expect(task.bookCount).to.be.above(0));",
+                  "    pm.test(\"ссылка на архив выписана\", () =>",
+                  "        pm.expect(task.downloadUrl).to.match(/\\/api\\/v1\\/archives\\/[^/]+\\/download\\//));",
+                  "    // Сам архив здесь не скачивается: в нём вся библиотека, а это гигабайты. Что подписанная",
+                  "    // ссылка действительно отдаёт байты, проверено выше на отдельной книге.",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Отрицательные проверки",
+      "item": [
+        {
+          "name": "Токен соседа",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "description": "Второй читатель стенда. Своих книг у него нет.",
+            "url": "{{keycloakUrl}}/realms/bookcase/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "bookcase-test"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{testClientSecret}}"
+                },
+                {
+                  "key": "username",
+                  "value": "{{neighbour}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{neighbourPassword}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"токен выдан\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"neighbourToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Чужая книга — 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{neighbourToken}}"
+              }
+            ],
+            "description": "Библиотека личная: чужая книга не «запрещена», её просто нет. 403 сообщал бы соседу, что книга с таким идентификатором существует.",
+            "url": "{{baseUrl}}/api/v1/books/{{bookId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Чужой файл — 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{neighbourToken}}"
+              }
+            ],
+            "description": "То же на уровне хранилища: файл виден только тому, у кого на него есть ссылка.",
+            "url": "{{baseUrl}}/api/v1/files/{{sha256}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Токен со сроком жизни в секунду",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "description": "Отдельный клиент стенда: срок жизни токена — одна секунда. Иначе просроченный токен пришлось бы ждать пять минут.",
+            "url": "{{keycloakUrl}}/realms/bookcase/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "bookcase-expiring"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{expiringClientSecret}}"
+                },
+                {
+                  "key": "username",
+                  "value": "{{reader}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{readerPassword}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"токен выдан\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"expiredToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Просроченный токен — отказ",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{expiredToken}}"
+              }
+            ],
+            "description": "Срок жизни токена — секунда, перед запросом выдержана пауза. На стенде отказ приходит от шлюза входа: он проверяет предъявленный токен сам и отвечает 403, не пропуская запрос дальше. Сам сервис на просроченный токен отвечает 401 с заголовком WWW-Authenticate — это проверено тестами модуля shared/security. Здесь важно, что негодный токен не открывает библиотеку ни на одном рубеже.",
+            "url": "{{baseUrl}}/api/v1/books"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Токену из предыдущего запроса нужно дать истечь: у него всего секунда.",
+                  "const until = Date.now() + 3000;",
+                  "while (Date.now() < until) { /* ждём, пока токен станет просроченным */ }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"отказ, а не выдача\", () => pm.expect(pm.response.code).to.be.oneOf([401, 403]));",
+                  "pm.test(\"тела с данными нет\", () => pm.expect(pm.response.text()).to.not.include(\"items\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Токен чужого получателя",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "description": "Клиент bookcase-foreign выписывает настоящий токен этого же realm, но без получателя bookcase-api.",
+            "url": "{{keycloakUrl}}/realms/bookcase/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "bookcase-foreign"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{foreignClientSecret}}"
+                },
+                {
+                  "key": "username",
+                  "value": "{{reader}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{readerPassword}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"токен выдан\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"foreignToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Токен чужого получателя — отказ",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{foreignToken}}"
+              }
+            ],
+            "description": "Токен настоящий и не просрочен, но выписан не этому API: получателя bookcase-api в нём нет. Первым это замечает шлюз входа (403) — у него получатель тоже перечислен; сервис за ним проверяет получателя повторно и отвечает 401. Без этой проверки токен от соседней системы того же realm открывал бы библиотеку.",
+            "url": "{{baseUrl}}/api/v1/books"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"отказ, а не выдача\", () => pm.expect(pm.response.code).to.be.oneOf([401, 403]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Без токена — 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "Запрос к API без токена получает отказ, а не страницу входа: перенаправление сообщило бы программному клиенту не то, что произошло.",
+            "url": "{{baseUrl}}/api/v1/books"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Подделанный пропуск — 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "У ссылки на скачивание испорчена подпись. Ответ — 404, а не 403, намеренно: по неверному пропуску файла для обратившегося не существует, и отличать «нет такого файла» от «подпись не сошлась» незачем — это подсказка тому, кто подбирает ссылки.",
+            "url": "{{downloadUrl}}-подделка"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "sha256",
+      "value": ""
+    },
+    {
+      "key": "taskId",
+      "value": ""
+    },
+    {
+      "key": "bookId",
+      "value": ""
+    },
+    {
+      "key": "title",
+      "value": ""
+    },
+    {
+      "key": "token",
+      "value": ""
+    }
+  ]
+}
