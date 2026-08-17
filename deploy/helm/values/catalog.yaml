@@ -1,0 +1,23 @@
+image:
+  repository: bookcase/catalog
+
+env:
+  DB_URL: jdbc:postgresql://bookcase-db-rw:5432/catalog
+  DB_USERNAME: catalog
+  STORAGE_URL: http://storage:8080
+  # Адрес, по которому ссылку на скачивание откроет браузер: он ведёт на шлюз,
+  # а не внутрь кластера, куда браузеру ходу нет.
+  STORAGE_PUBLIC_URL: http://localhost:8080
+
+# Наружу сервис выставляет не он сам, а шлюз входа: он единственная точка,
+# через которую приходят и браузер, и программные клиенты.
+route:
+  enabled: false
+
+network:
+  allowFrom: ["oauth2-proxy"]
+  # Каталог ходит в хранилище: за пропусками на скачивание, за обложками
+  # и чтобы сообщить, что файл больше не нужен.
+  allowTo:
+    - service: storage
+      port: 8080

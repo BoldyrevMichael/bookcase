@@ -1,0 +1,544 @@
+# Окружение сервисов. Значения рассчитаны на одноузловой стенд: одна копия каждого,
+# скромные пределы, данные в обычных томах. Для настоящего кластера здесь менялись бы
+# число копий, классы хранения и способ выдачи секретов.
+
+# Пароли и ключи стенда. В настоящем окружении их сюда не пишут: значения приезжают
+# из хранилища секретов, а чарт лишь ссылается на них по имени.
+secrets:
+  create: true
+  postgresPassword: postgres
+  servicePassword: service
+  valkeyPassword: valkey
+  keycloakAdminPassword: admin
+  s3AccessKey: storage
+  s3SecretKey: storage-secret
+  downloadTokenSecret: local-dev-download-secret
+  bffClientSecret: local-dev-bff-secret
+  bffCookieSecret: bookcase-local-cookie-secret-32b
+  enricherClientSecret: local-dev-enricher-secret
+  googleBooksApiKey: ""
+
+# ── База: объект оператора CloudNativePG ──────────────────────────────────────
+postgresql:
+  enabled: true
+  name: bookcase-db
+  instances: 1
+  image: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage: 8Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "2"
+      memory: 512Mi
+  # Своя база и своя роль на каждый сервис. Расширения нужны только каталогу:
+  # на них держатся поиск по словам и поиск с опечаткой.
+  databases:
+    - name: catalog
+      extensions: [pg_trgm, unaccent]
+    - name: storage
+    - name: ingester
+    - name: enricher
+    - name: keycloak
+
+# ── Очередь: объекты оператора Strimzi ────────────────────────────────────────
+kafka:
+  enabled: true
+  name: bookcase-kafka
+  replicas: 1
+  # Версия из тех, что умеет ведущий её оператор: Strimzi 1.1 держит 4.2 и 4.3.
+  # На стенде с compose стоит 4.3.1 — берём ту же линейку.
+  version: 4.3.0
+  metadataVersion: "4.3"
+  storage: 8Gi
+  heap:
+    min: 256m
+    max: 768m
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+  topicOperatorResources:
+    requests:
+      cpu: 50m
+      memory: 192Mi
+    limits:
+      cpu: 500m
+      memory: 320Mi
+  topics:
+  - name: book.ingestion.requested
+    partitions: 12
+    retentionMs: 604800000
+  - name: book.ingestion.requested.ingester.retry
+    partitions: 12
+    retentionMs: 604800000
+  - name: book.ingestion.requested.ingester.dlt
+    partitions: 1
+    retentionMs: 2592000000
+  - name: book.metadata.extracted
+    partitions: 6
+    retentionMs: 604800000
+  - name: book.metadata.extracted.catalog.retry
+    partitions: 6
+    retentionMs: 604800000
+  - name: book.metadata.extracted.catalog.dlt
+    partitions: 1
+    retentionMs: 2592000000
+  - name: book.added
+    partitions: 6
+    retentionMs: 604800000
+  - name: book.added.enricher.dlt
+    partitions: 1
+    retentionMs: 2592000000
+  - name: book.ingestion.failed
+    partitions: 3
+    retentionMs: 604800000
+  - name: book.ingestion.failed.catalog.dlt
+    partitions: 1
+    retentionMs: 2592000000
+  - name: book.deleted
+    partitions: 6
+    retentionMs: 604800000
+  - name: book.deleted.enricher.retry
+    partitions: 6
+    retentionMs: 604800000
+  - name: book.deleted.enricher.dlt
+    partitions: 1
+    retentionMs: 2592000000
+  - name: book.enrichment.requested
+    partitions: 6
+    retentionMs: 604800000
+  - name: book.enrichment.requested.enricher.retry
+    partitions: 6
+    retentionMs: 604800000
+  - name: book.enrichment.requested.enricher.dlt
+    partitions: 1
+    retentionMs: 2592000000
+  - name: book.enriched
+    partitions: 6
+    retentionMs: 604800000
+  - name: book.enriched.catalog.retry
+    partitions: 6
+    retentionMs: 604800000
+  - name: book.enriched.catalog.dlt
+    partitions: 1
+    retentionMs: 2592000000
+  - name: export.requested
+    partitions: 3
+    retentionMs: 604800000
+  - name: export.requested.storage.retry
+    partitions: 3
+    retentionMs: 604800000
+  - name: export.requested.storage.dlt
+    partitions: 1
+    retentionMs: 2592000000
+  - name: export.completed
+    partitions: 3
+    retentionMs: 604800000
+  - name: export.completed.catalog.dlt
+    partitions: 1
+    retentionMs: 2592000000
+  - name: export.failed
+    partitions: 3
+    retentionMs: 604800000
+  - name: export.failed.catalog.dlt
+    partitions: 1
+    retentionMs: 2592000000
+
+# Адрес, по которому библиотека видна снаружи. Он попадает и в токены (издатель),
+# и в адрес возврата после входа, поэтому задан одним значением на весь чарт.
+# В global — потому что его должны видеть и чужие чарты: свои значения у подчарта
+# отдельные, и обычная ссылка внутри них разворачивается в пустоту.
+global:
+  externalUrl: http://localhost:8080
+
+externalUrl: http://localhost:8080
+keycloakInternalUrl: http://platform-keycloakx-http
+
+gateway:
+  enabled: true
+  name: bookcase
+  className: eg
+  port: 80
+  # Подсеть подов: только от неё принимается заголовок с адресом клиента.
+  trustedProxyCidr: 10.244.0.0/16
+
+# ── Чужие чарты ───────────────────────────────────────────────────────────────
+
+# Хранилище сессий шлюза. Единственное его назначение — держать токены, которые
+# не влезают в cookie размером в четыре килобайта.
+valkey:
+  enabled: true
+  auth:
+    enabled: true
+    # Пароль лежит в секрете; ключ в нём назван по имени пользователя. Права
+    # у единственного пользователя полные — хранилище держит только сессии шлюза,
+    # и разграничивать в нём нечего.
+    usersExistingSecret: bookcase-valkey
+    aclUsers:
+      default:
+        permissions: "~* &* +@all"
+        passwordKey: password
+  # Предел памяти у самой программы, а не только у контейнера: иначе она считает
+  # своей всю доступную память и вытесняет соседей.
+  extraArgs:
+    - --maxmemory
+    - 96mb
+    - --maxmemory-policy
+    - volatile-lru
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 128Mi
+  # Подготовительный контейнер: раскладывает настройки перед запуском.
+  initResources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      cpu: 100m
+      memory: 32Mi
+
+# Учётные записи. Образ официальный, чарт — сообщества: своего у Keycloak нет,
+# есть только оператор, а он для одного экземпляра избыточен.
+keycloakx:
+  enabled: true
+  # Путь, на котором живёт Keycloak. По умолчанию чарт ставит /auth, но адреса
+  # издателя и ключей записаны в токенах и настройках сервисов без приставки —
+  # разъехавшийся путь означал бы 404 на самом входе. Значение читают и пробы.
+  http:
+    relativePath: "/"
+  image:
+    repository: quay.io/keycloak/keycloak
+    tag: "26.7.1"
+  command:
+    - /opt/keycloak/bin/kc.sh
+  args:
+    - start
+    - --import-realm
+  extraEnv: |
+    - name: KC_DB
+      value: postgres
+    - name: KC_DB_URL
+      value: jdbc:postgresql://bookcase-db-rw:5432/keycloak
+    - name: KC_DB_USERNAME
+      value: keycloak
+    - name: KC_DB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: bookcase-db-keycloak
+          key: password
+    - name: KC_BOOTSTRAP_ADMIN_USERNAME
+      value: admin
+    - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: bookcase-keycloak
+          key: admin-password
+    # Издатель задаётся явно: иначе Keycloak подставляет в токен тот адрес,
+    # по которому пришли, и токены получаются с разными издателями.
+    - name: KC_HOSTNAME
+      value: {{ .Values.global.externalUrl }}
+    - name: KC_HOSTNAME_STRICT
+      value: "false"
+    # KC_HTTP_ENABLED, KC_HEALTH_ENABLED и KC_METRICS_ENABLED здесь не задаются:
+    # их ставит сам чарт из http.relativePath, health.enabled и metrics.enabled
+    # (ниже). Повтор той же переменной в одном контейнере — не ошибка для
+    # Kubernetes, но означает, что значение задано в двух местах и однажды
+    # они разойдутся.
+    - name: JAVA_OPTS_APPEND
+      value: -XX:MaxRAMPercentage=70
+  extraVolumes: |
+    - name: realm
+      secret:
+        secretName: bookcase-realm
+  extraVolumeMounts: |
+    - name: realm
+      mountPath: /opt/keycloak/data/import
+      readOnly: true
+  health:
+    enabled: true
+  metrics:
+    enabled: true
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+
+# Вход снаружи: шлюз проходит OIDC сам и держит сессию, браузеру достаётся
+# только cookie. Настройка повторяет проверенную на стенде.
+oauth2-proxy:
+  enabled: true
+  image:
+    # Хранилище образов и путь в нём чарт складывает сам: если написать полный
+    # адрес в repository, получается «quay.io/quay.io/...» и образ не находится.
+    registry: quay.io
+    repository: oauth2-proxy/oauth2-proxy
+    tag: v7.15.3
+  config:
+    # Файл настроек — картой, учётные данные — секретом: чарт различает их и берёт
+    # каждое из своего места.
+    existingConfig: bookcase-bff-config
+    existingSecret: bookcase-bff
+  sessionStorage:
+    type: redis
+    redis:
+      existingSecret: bookcase-valkey
+      passwordKey: password
+      clientType: standalone
+      standalone:
+        # Имя службы, которое даёт чарт Valkey: без «-primary», он один.
+        connectionUrl: redis://platform-valkey:6379
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 128Mi
+
+seaweedfs:
+  enabled: true
+  # Один процесс со всеми ролями: для стенда разделение мастера, томов и файлера
+  # по отдельным подам ничего не даёт, а памяти просит втрое больше.
+  #
+  # Пределы у всех четырёх частей заданы вручную: чарт не предлагает их вовсе,
+  # и без этого хранилище — единственное место в кластере, которое ничем
+  # не ограничено. Основная нагрузка приходится на тома (через них идут байты книг),
+  # мастер и файлер держат только учёт.
+  master:
+    replicas: 1
+    data:
+      type: emptyDir
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+  volume:
+    replicas: 1
+    data:
+      type: emptyDir
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: "1"
+        memory: 512Mi
+  filer:
+    replicas: 1
+    data:
+      type: emptyDir
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+  s3:
+    enabled: true
+    enableAuth: true
+    existingConfigSecret: bookcase-seaweedfs-s3
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: "1"
+        memory: 256Mi
+
+prometheus:
+  enabled: true
+  # Сосед по поду, который просит Prometheus перечитать настройки при их изменении.
+  configmapReload:
+    prometheus:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 100m
+          memory: 32Mi
+  # Частота съёма та же, что в стенде. У чарта по умолчанию минута, и с ней
+  # дашборд ведёт себя иначе: в окне rate(...[5m]) остаётся пять точек вместо
+  # двадцати, короткие всплески сглаживаются в ноль, а доли отвечают на нагрузку
+  # с заметным опозданием. Дашборд один на оба места — значит и условия съёма
+  # должны совпадать, иначе одна и та же панель показывает разное.
+  server:
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+    persistentVolume:
+      enabled: false
+    retention: 7d
+    # Предел не только по сроку, но и по размеру: иначе база растёт, пока есть диск.
+    retentionSize: 2GB
+    # Примеры: к делениям гистограмм прикрепляется идентификатор трассы того запроса,
+    # который в это деление попал. Без этого признака Prometheus выбрасывает их при сборе.
+    extraFlags:
+      - web.enable-lifecycle
+      - enable-feature=exemplar-storage
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 768Mi
+  alertmanager:
+    enabled: false
+  prometheus-pushgateway:
+    enabled: false
+  prometheus-node-exporter:
+    enabled: false
+  kube-state-metrics:
+    enabled: false
+
+grafana:
+  enabled: true
+  persistence:
+    enabled: false
+  # Права — только в своём пространстве имён. По умолчанию чарт заводит роль
+  # уровня кластера с правом читать секреты везде: сосед по поду, который
+  # подбирает дашборды, ищет карты настроек во всём кластере. Дашборды лежат
+  # рядом, в том же пространстве имён, — значит и права нужны только здесь.
+  rbac:
+    namespaced: true
+  # Дашборды подхватываются из карт настроек с меткой grafana_dashboard.
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      folder: /tmp/dashboards
+    # Тот же принцип, что у остальных: у соседа по поду свои пределы, иначе он
+    # делит с Grafana её долю процессора и памяти без всякой границы. Предел
+    # подобран по месту: со 64 МиБ этот контейнер снимается по нехватке памяти —
+    # он держит подключение к API кластера и разбирает содержимое карт настроек.
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 192Mi
+  # Проверочный под чарта (`helm test`) в стенде не запускается, а в проверке
+  # манифестов он единственный без пределов и прав. Не создаём его вовсе.
+  testFramework:
+    enabled: false
+  # Источники данных прописаны здесь же: искать их руками после каждой установки незачем.
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          uid: prometheus
+          url: http://platform-prometheus-server
+          isDefault: true
+          jsonData:
+            # То же значение, что у сбора: по нему Grafana подбирает шаг запроса.
+            timeInterval: 15s
+            # Точка на графике, за которой стоит конкретный запрос: по идентификатору
+            # трассы из неё открывается сам путь запроса в Tempo.
+            exemplarTraceIdDestinations:
+              - name: trace_id
+                datasourceUid: tempo
+        - name: Tempo
+          type: tempo
+          uid: tempo
+          url: http://platform-tempo:3200
+  adminUser: admin
+  adminPassword: admin
+  service:
+    type: ClusterIP
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 384Mi
+
+# Хранилище трасс. Настройки повторяют стенд намеренно: расхождение между тем, что
+# видно на своей машине, и тем, что в кластере, — источник разбирательств на ровном месте.
+tempo:
+  enabled: true
+  tempo:
+    tag: "2.9.5"
+    # Отчёты о применении наружу не отправляются.
+    reportingEnabled: false
+    # Резерв памяти под сборщик мусора. По умолчанию гигабайт — при пределе
+    # в полгигабайта это заведомая нехватка памяти.
+    memBallastSizeMbs: 64
+    # Сколько хранить трассы. Без предела они копятся, пока есть диск.
+    retention: 48h
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: "1"
+        memory: 512Mi
+  # Трассы живут двое суток и переживать перезапуск не обязаны: это стенд,
+  # а не хранилище, из которого потом разбирают происшествия.
+  persistence:
+    enabled: false
+  # Настройки целиком свои, а не собранные чартом из отдельных значений. Причина одна:
+  # по частям из приёмников не убрать Jaeger и OpenCensus — шаблон портов у чарта на них
+  # рассчитан и падает, если их стереть. Здесь принимается только OTLP, на котором и
+  # говорят сервисы. Текст совпадает с `deploy/compose/tempo/tempo.yaml`: расхождение
+  # между тем, что видно на своей машине, и тем, что в кластере, — источник
+  # разбирательств на ровном месте.
+  #
+  # Порты Jaeger и Zipkin у службы всё равно объявлены: чарт перечисляет их жёстко.
+  # Слушать их некому — приёмники не подняты.
+  config: |
+    memberlist:
+      cluster_label: "{{ .Release.Name }}.{{ .Release.Namespace }}"
+    multitenancy_enabled: false
+    usage_report:
+      reporting_enabled: false
+    server:
+      http_listen_port: 3200
+    distributor:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
+    ingester:
+      # Насколько долго трасса лежит в памяти, прежде чем попасть на диск. По умолчанию
+      # полчаса, и всё это время свежую трассу не найти поиском; здесь смотрят как раз
+      # то, что только что произошло.
+      max_block_duration: 1m
+    compactor:
+      compaction:
+        block_retention: 48h
+    storage:
+      trace:
+        backend: local
+        local:
+          path: /var/tempo/traces
+        wal:
+          path: /var/tempo/wal
+    overrides:
+      defaults:
+        global:
+          # Предел на саму программу: одна трасса не должна съесть память целиком.
+          max_bytes_per_trace: 5000000

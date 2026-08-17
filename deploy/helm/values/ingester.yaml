@@ -1,0 +1,31 @@
+image:
+  repository: bookcase/ingester
+
+env:
+  DB_URL: jdbc:postgresql://bookcase-db-rw:5432/ingester
+  DB_USERNAME: ingester
+  STORAGE_URL: http://storage:8080
+  MAX_PARSE_SIZE: 1GB
+
+# Разбор скачивает книгу во временный файл: держать гигабайт в памяти незачем.
+tmpSizeLimit: 2Gi
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    # Разбор упирается в процессор: PDF на сотни страниц разбирается секундами.
+    cpu: "2"
+    memory: 768Mi
+
+# Наружу сервис выставляет не он сам, а шлюз входа: он единственная точка,
+# через которую приходят и браузер, и программные клиенты.
+route:
+  enabled: false
+
+network:
+  allowFrom: ["oauth2-proxy"]
+  allowTo:
+    - service: storage
+      port: 8080

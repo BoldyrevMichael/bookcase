@@ -1,0 +1,55 @@
+apiVersion: v2
+name: platform
+description: |
+  Окружение, в котором живут сервисы bookcase: база, очередь, объектное хранилище,
+  учётные записи, кэш сессий, вход снаружи и наблюдаемость.
+
+  Это законный случай зонтичного чарта: он собирает чужие чарты и ставится один раз
+  на кластер. Сами сервисы зонтиком не накрыты — у них единицей выката должен быть
+  сервис, а не приложение целиком.
+
+  Всё взято у самих проектов. Чарты Bitnami, которыми обычно ставят такие вещи,
+  с августа 2025 указывают на образы, закрытые для публичного скачивания: доступны
+  лишь замороженные копии без исправлений безопасности. Закладывать в новый проект
+  заведомо необновляемое нельзя — по этой же причине из проекта ушёл MinIO.
+
+  База и очередь ставятся операторами (CloudNativePG и Strimzi) — так их и ведут
+  в промышленных окружениях: оператор умеет то, ради чего база в кластере и заводится,
+  — переключение при отказе, резервные копии, обновление версии без простоя.
+  Сами операторы ставятся до этого чарта, отдельными релизами: они кластерные,
+  живут в своих пространствах имён и переживают переустановку приложения.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+dependencies:
+  - name: valkey
+    version: "0.11.0"
+    repository: https://valkey.io/valkey-helm/
+    condition: valkey.enabled
+  - name: keycloakx
+    version: "7.2.2"
+    repository: https://codecentric.github.io/helm-charts
+    condition: keycloakx.enabled
+  - name: oauth2-proxy
+    version: "10.7.0"
+    repository: https://oauth2-proxy.github.io/manifests
+    condition: oauth2-proxy.enabled
+  - name: seaweedfs
+    version: "4.41.0"
+    repository: https://seaweedfs.github.io/seaweedfs/helm
+    condition: seaweedfs.enabled
+  - name: prometheus
+    version: "29.24.0"
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: prometheus.enabled
+  - name: grafana
+    version: "10.5.15"
+    repository: https://grafana.github.io/helm-charts
+    condition: grafana.enabled
+  # Хранилище трасс. Чарт «в один процесс» — есть и режим из отдельных служб
+  # (tempo-distributed), но он рассчитан на поток, которого здесь нет.
+  - name: tempo
+    version: "1.24.4"
+    repository: https://grafana.github.io/helm-charts
+    condition: tempo.enabled

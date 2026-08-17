@@ -1,0 +1,45 @@
+image:
+  repository: bookcase/enricher
+
+env:
+  DB_URL: jdbc:postgresql://bookcase-db-rw:5432/enricher
+  DB_USERNAME: enricher
+  STORAGE_URL: http://storage:8080
+  OIDC_TOKEN_URI: http://platform-keycloakx-http/realms/bookcase/protocol/openid-connect/token
+  OPEN_LIBRARY_ENABLED: "true"
+
+envFromSecret:
+  DB_PASSWORD:
+    secret: bookcase-db-enricher
+    key: password
+  # Ключ справочника и секрет служебной учётной записи — секреты и в кластере
+  # живут секретами, а не значениями чарта в репозитории.
+  GOOGLE_BOOKS_API_KEY:
+    secret: bookcase-enricher
+    key: google-books-api-key
+  ENRICHER_CLIENT_SECRET:
+    secret: bookcase-enricher
+    key: client-secret
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 320Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+# Снаружи уточнителя не спрашивают: он работает по событиям и расписанию.
+route:
+  enabled: false
+
+network:
+  allowFrom: []
+  # Единственный, кому позволено выйти в интернет: за метаданными книг больше
+  # сходить некуда. Всем остальным это запрещено манифестом, а не договорённостью.
+  allowExternal: true
+  allowTo:
+    - service: storage
+      port: 8080
+    - service: keycloak
+      port: 8080

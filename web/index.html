@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Каталог — bookcase</title>
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<main>
+    <h1>Каталог</h1>
+
+    <form class="panel" id="search-form">
+        <div class="row">
+            <label class="visually-hidden" for="q">Что искать</label>
+            <input type="search" id="q" name="q" placeholder="Название, автор, серия, издательство"
+                   class="search-field" autocomplete="off">
+            <label class="visually-hidden" for="sort">Порядок</label>
+            <select id="sort" class="auto-width">
+                <option value="ADDED">сначала новые</option>
+                <option value="TITLE">по названию</option>
+                <option value="RELEVANCE">по совпадению</option>
+            </select>
+            <button class="primary" type="submit">Искать</button>
+            <button type="button" id="reset">Сбросить</button>
+        </div>
+        <p class="note hint" id="hint">
+            Поиск переживает опечатки и находит по части слова.
+        </p>
+    </form>
+
+    <div class="layout">
+        <aside class="filters">
+            <h2>Формат</h2>
+            <div id="facet-formats"></div>
+            <h2>Тема</h2>
+            <div id="facet-themes"></div>
+            <h2>Язык</h2>
+            <div id="facet-languages"></div>
+            <h2>Полка</h2>
+            <div id="facet-shelves"></div>
+            <h2>Избранное</h2>
+            <button type="button" class="facet" id="only-favorite" aria-pressed="false">
+                <span>только избранные</span>
+            </button>
+        </aside>
+
+        <section>
+            <div class="row below">
+                <span class="note" id="summary"></span>
+                <span id="collection-filter" class="hidden">
+                    <span class="chip" id="collection-name">подборка</span>
+                    <button class="quiet" id="drop-collection">снять отбор</button>
+                </span>
+            </div>
+            <div class="books" id="books"></div>
+            <div class="row centered">
+                <button id="more" class="hidden">Показать ещё</button>
+            </div>
+        </section>
+    </div>
+</main>
+
+<script src="/js/app.js" defer></script>
+<script src="/js/catalog.js" defer></script>
+</body>
+</html>

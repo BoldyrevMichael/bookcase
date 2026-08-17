@@ -1,0 +1,17 @@
+{{- if .Values.grafana.enabled }}
+# Дашборды приезжают в кластер картой настроек, а не заводятся руками в интерфейсе:
+# правка через интерфейс осталась бы только в базе Grafana и пропала бы при первом же
+# пересоздании. Источник один и тот же для стенда и кластера — файлы в репозитории.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bookcase-dashboards
+  labels:
+    # По этой метке чарт Grafana сам находит и подключает дашборды.
+    grafana_dashboard: "1"
+data:
+  {{- range $path, $_ := .Files.Glob "files/dashboards/*.json" }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+  {{- end }}
+{{- end }}

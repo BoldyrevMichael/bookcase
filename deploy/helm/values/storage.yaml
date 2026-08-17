@@ -1,0 +1,48 @@
+image:
+  repository: bookcase/storage
+
+env:
+  DB_URL: jdbc:postgresql://bookcase-db-rw:5432/storage
+  DB_USERNAME: storage
+  S3_ENDPOINT: http://platform-seaweedfs-s3:8333
+  BOOKS_BUCKET: books
+  EXPORTS_BUCKET: exports
+  COVERS_BUCKET: covers
+
+envFromSecret:
+  DB_PASSWORD:
+    secret: bookcase-db-storage
+    key: password
+  S3_ACCESS_KEY:
+    secret: bookcase-storage
+    key: s3-access-key
+  S3_SECRET_KEY:
+    secret: bookcase-storage
+    key: s3-secret-key
+  DOWNLOAD_TOKEN_SECRET:
+    secret: bookcase-storage
+    key: download-token-secret
+
+# Книга приходит целиком и до попадания в хранилище лежит на диске: приёмник запроса
+# складывает тело туда, а не держит в памяти. Гигабайтный файл требует места.
+tmpSizeLimit: 2Gi
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 384Mi
+  limits:
+    cpu: "2"
+    memory: 640Mi
+
+# Наружу сервис выставляет не он сам, а шлюз входа: он единственная точка,
+# через которую приходят и браузер, и программные клиенты.
+route:
+  enabled: false
+
+network:
+  allowFrom: ["oauth2-proxy", "catalog", "ingester", "enricher"]
+  toKafka: true
+  allowTo:
+    - service: seaweedfs
+      port: 8333

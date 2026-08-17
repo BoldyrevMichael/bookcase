@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Выгрузка — bookcase</title>
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<main>
+    <h1>Выгрузка библиотеки</h1>
+
+    <div class="panel">
+        <p class="tight">
+            Собирает все ваши книги в один архив под теми же именами, под которыми они скачиваются
+            по одной: «Фамилия И. — Название (Год)».
+        </p>
+        <p class="note">
+            Архив собирается в фоне: библиотека на несколько гигабайт складывается не мгновенно,
+            и держать ради этого открытой страницу не нужно — вернитесь сюда позже по ссылке
+            на задачу. Готовый архив хранится сутки.
+        </p>
+        <div class="row">
+            <button class="primary" id="start">Собрать архив</button>
+            <span class="note" id="start-note"></span>
+        </div>
+    </div>
+
+    <div class="panel hidden" id="task">
+        <h2 class="tight">Задача</h2>
+        <dl class="props">
+            <dt>Состояние</dt><dd id="task-status"></dd>
+            <dt>Книг в архиве</dt><dd id="task-count"></dd>
+            <dt>Заведена</dt><dd id="task-created"></dd>
+        </dl>
+        <div class="row">
+            <button class="primary hidden" id="download">Скачать архив</button>
+            <button id="refresh">Обновить</button>
+            <span class="note" id="task-note"></span>
+        </div>
+    </div>
+</main>
+
+<script src="/js/app.js" defer></script>
+<script src="/js/export.js" defer></script>
+</body>
+</html>

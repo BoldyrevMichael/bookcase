@@ -1,0 +1,213 @@
+{
+  "realm": "bookcase",
+  "displayName": "bookcase",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": false,
+  "resetPasswordAllowed": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "verifyEmail": false,
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "internationalizationEnabled": true,
+  "supportedLocales": [
+    "ru",
+    "en"
+  ],
+  "defaultLocale": "ru",
+  "clients": [
+    {
+      "clientId": "bookcase-api",
+      "name": "API bookcase",
+      "description": "Существует ради имени получателя в токене; входа через него нет",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false
+    },
+    {
+      "clientId": "bookcase-bff",
+      "name": "oauth2-proxy (вход из браузера)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "local-dev-bff-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:4180/oauth2/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:4180"
+      ],
+      "attributes": {
+        "post.logout.redirect.uris": "http://localhost:4180/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience-bookcase-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "bookcase-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "bookcase-test",
+      "name": "Тестовый клиент (прямой обмен логина на токен)",
+      "description": "Только для стенда и коллекции запросов: в рабочем окружении такого клиента нет",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "local-dev-test-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "protocolMappers": [
+        {
+          "name": "audience-bookcase-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "bookcase-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "bookcase-expiring",
+      "name": "Клиент с мгновенно устаревающим токеном (для отрицательной проверки)",
+      "description": "Срок жизни токена — одна секунда: коллекция запросов берёт токен, ждёт и проверяет, что сервис отвечает 401",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "local-dev-expiring-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "attributes": {
+        "access.token.lifespan": "1"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience-bookcase-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "bookcase-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "bookcase-foreign",
+      "name": "Клиент чужого получателя (для отрицательной проверки)",
+      "description": "Выдаёт токен без aud=bookcase-api: сервисы обязаны отвечать на него 401",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "local-dev-foreign-secret",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true
+    },
+    {
+      "clientId": "bookcase-enricher",
+      "name": "Уточнитель метаданных (служебная учётная запись)",
+      "description": "Ходит в storage от своего имени: обложки приходят в фоне, когда токена пользователя уже нет",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "local-dev-enricher-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "audience-bookcase-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "bookcase-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "reader",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "reader@bookcase.test",
+      "firstName": "Читатель",
+      "lastName": "Первый",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "reader",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "neighbour",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "neighbour@bookcase.test",
+      "firstName": "Читатель",
+      "lastName": "Второй",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "neighbour",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "service-account-bookcase-enricher",
+      "enabled": true,
+      "serviceAccountClientId": "bookcase-enricher",
+      "realmRoles": [
+        "covers-writer"
+      ]
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "covers-writer",
+        "description": "Право класть обложки в хранилище: выдаётся служебной учётной записи уточнителя"
+      }
+    ]
+  }
+}

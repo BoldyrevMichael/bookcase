@@ -1,0 +1,24 @@
+{
+  "identities": [
+    {
+      "name": "storage",
+      "credentials": [
+        {
+          "accessKey": "storage",
+          "secretKey": "storage-secret"
+        }
+      ],
+      "actions": ["Read", "Write", "List", "Tagging"]
+    },
+    {
+      "name": "local-admin",
+      "credentials": [
+        {
+          "accessKey": "admin",
+          "secretKey": "admin-secret"
+        }
+      ],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

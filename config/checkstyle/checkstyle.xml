@@ -1,0 +1,259 @@
+<?xml version="1.0"?>
+<!DOCTYPE module PUBLIC
+        "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN"
+        "https://checkstyle.org/dtds/configuration_1_3.dtd">
+
+<!--
+    Ядро набора — Google Java Style, к нему добавлены правила из sun_checks,
+    которых у google нет вовсе: они про дефекты и размеры, а не про стиль
+    (EqualsHashCode, VisibilityModifier, MethodLength, HideUtilityClassConstructor).
+
+    Раскладкой кода набор не занимается — это работа форматтера
+    (google-java-format в режиме AOSP, подключён Spotless в конвенции качества).
+    Правила о пробелах и скобках оставлены барьером на случай, когда файл
+    правится в обход форматтера; при работающем spotlessApply они не срабатывают.
+
+    Длина строки — 100, столько же держит форматтер.
+
+    Javadoc обязателен на публичных типах, кроме классов со стереотипными
+    аннотациями Spring; на методах он необязателен, но написанные теги
+    сверяются с сигнатурой.
+
+    Исключения оформляются четырьмя способами:
+      config/checkstyle/suppressions.xml               — общие для репозитория;
+      services/<имя>/config/checkstyle/suppressions.xml — собственные для модуля;
+      @SuppressWarnings("checkstyle:ИмяПравила")        — на объявлении;
+      // CHECKSTYLE.OFF: ИмяПравила … // CHECKSTYLE.ON: ИмяПравила — по месту.
+-->
+<module name="Checker">
+    <property name="charset" value="UTF-8"/>
+    <property name="severity" value="warning"/>
+    <property name="fileExtensions" value="java"/>
+
+    <!-- Подавления, общие для всего репозитория: config/checkstyle/suppressions.xml -->
+    <module name="SuppressionFilter">
+        <property name="file" value="${config_loc}/suppressions.xml"/>
+        <property name="optional" value="true"/>
+    </module>
+
+    <!-- Подавления конкретного модуля: services/<имя>/config/checkstyle/suppressions.xml -->
+    <module name="SuppressionFilter">
+        <property name="file" value="${module_config}/suppressions.xml"/>
+        <property name="optional" value="true"/>
+    </module>
+
+    <!-- Позволяет гасить правило точечно: @SuppressWarnings("checkstyle:MethodName") -->
+    <module name="SuppressWarningsFilter"/>
+
+    <!-- Сгенерированный код не проверяем -->
+    <module name="BeforeExecutionExclusionFileFilter">
+        <property name="fileNamePattern"
+                  value=".*[\\/]generated[\\/].*|.*[\\/]build[\\/]generated.*"/>
+    </module>
+
+    <!-- Подавление комментарием для проверок уровня файла (LineLength,
+         FileTabCharacter, NewlineAtEndOfFile): фильтр внутри TreeWalker их не
+         видит, потому что они работают до разбора в дерево. Список правил здесь
+         задан явно и не случайно: фильтр читает сырой текст и не отличает
+         комментарий от строкового литерала, поэтому область его действия
+         сознательно сужена до трёх файловых проверок. Всё остальное
+         подавляется фильтром внутри TreeWalker — тот берёт комментарии из
+         разобранного дерева и на литералы не реагирует -->
+    <module name="SuppressWithPlainTextCommentFilter">
+        <property name="offCommentFormat"
+                  value="CHECKSTYLE.OFF\: (LineLength|FileTabCharacter|NewlineAtEndOfFile)"/>
+        <property name="onCommentFormat"
+                  value="CHECKSTYLE.ON\: (LineLength|FileTabCharacter|NewlineAtEndOfFile)"/>
+        <property name="checkFormat" value="$1"/>
+    </module>
+
+    <!-- В тестах JUnit требует не-private поля для @TempDir и
+         @RegisterExtension, поэтому VisibilityModifier действует только
+         на основной код -->
+    <module name="SuppressionSingleFilter">
+        <property name="checks" value="VisibilityModifier"/>
+        <property name="files" value="[\\/]src[\\/]test[\\/]"/>
+    </module>
+
+    <!-- ── Проверки уровня файла ───────────────────────────────────── -->
+    <module name="FileTabCharacter">
+        <property name="eachLine" value="true"/>
+    </module>
+
+    <!-- 100 — ширина, которую держит google-java-format в режиме AOSP -->
+    <module name="LineLength">
+        <property name="fileExtensions" value="java"/>
+        <property name="max" value="100"/>
+        <property name="ignorePattern"
+                  value="^package.*|^import.*|a href|href|http://|https://|ftp://"/>
+    </module>
+
+    <module name="NewlineAtEndOfFile"/>
+
+    <!-- ── Проверки по AST ─────────────────────────────────────────── -->
+    <module name="TreeWalker">
+
+        <module name="SuppressWarningsHolder"/>
+        <!-- Расположение аннотаций (AnnotationLocation) не проверяется: это
+             раскладка кода, ею занимается форматтер. google-java-format
+             оставляет аннотации без параметров на строке объявления, а
+             аннотации с параметрами выносит на отдельные строки — правило
+             Checkstyle этому противоречит и валило бы сборку на выводе
+             форматтера -->
+
+        <!-- Импорты -->
+        <module name="AvoidStarImport"/>
+        <module name="RedundantImport"/>
+        <module name="UnusedImports"/>
+        <module name="IllegalImport"/>
+
+        <!-- Именование -->
+        <module name="PackageName">
+            <property name="format" value="^[a-z]+(\.[a-z][a-z0-9]*)*$"/>
+        </module>
+        <module name="TypeName"/>
+        <module name="MemberName">
+            <property name="format" value="^[a-z][a-z0-9][a-zA-Z0-9]*$|^[a-z]$"/>
+        </module>
+        <module name="ParameterName">
+            <property name="format" value="^[a-z]([a-z0-9][a-zA-Z0-9]*)?$"/>
+        </module>
+        <module name="LocalVariableName">
+            <property name="format" value="^[a-z]([a-z0-9][a-zA-Z0-9]*)?$"/>
+        </module>
+        <module name="ClassTypeParameterName">
+            <property name="format" value="(^[A-Z][0-9]?)$|([A-Z][a-zA-Z0-9]*[T]$)"/>
+        </module>
+        <module name="MethodTypeParameterName">
+            <property name="format" value="(^[A-Z][0-9]?)$|([A-Z][a-zA-Z0-9]*[T]$)"/>
+        </module>
+        <!-- Исключение из UPPER_CASE: имя log — устоявшаяся идиома для логгера SLF4J -->
+        <module name="ConstantName">
+            <property name="format" value="^log$|^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$"/>
+        </module>
+        <module name="StaticVariableName"/>
+        <module name="MethodName"/>
+        <module name="CatchParameterName"/>
+        <module name="LambdaParameterName"/>
+        <module name="PatternVariableName"/>
+        <module name="RecordComponentName"/>
+        <!-- Аббревиатура — обычное слово: HttpServer, а не HTTPServer -->
+        <module name="AbbreviationAsWordInName">
+            <property name="ignoreFinal" value="false"/>
+            <property name="allowedAbbreviationLength" value="0"/>
+            <property name="tokens"
+                      value="CLASS_DEF, INTERFACE_DEF, ENUM_DEF, ANNOTATION_DEF, ANNOTATION_FIELD_DEF,
+                             PARAMETER_DEF, VARIABLE_DEF, METHOD_DEF, PATTERN_VARIABLE_DEF, RECORD_DEF,
+                             RECORD_COMPONENT_DEF"/>
+        </module>
+
+        <!-- Структура файла -->
+        <module name="OuterTypeFilename"/>
+        <module name="OneTopLevelClass"/>
+
+        <!-- Пробелы. При работающем форматтере эта группа и группа «Скобки»
+             ниже не срабатывают: такой код форматтер не создаёт -->
+        <module name="GenericWhitespace"/>
+        <module name="MethodParamPad"/>
+        <module name="NoWhitespaceBefore">
+            <property name="tokens" value="COMMA,SEMI,POST_INC,POST_DEC,ELLIPSIS"/>
+        </module>
+        <module name="WhitespaceAround">
+            <property name="allowEmptyConstructors" value="true"/>
+            <property name="allowEmptyLambdas" value="true"/>
+            <property name="allowEmptyMethods" value="true"/>
+            <property name="allowEmptyTypes" value="true"/>
+            <property name="allowEmptyCatches" value="true"/>
+        </module>
+        <module name="WhitespaceAfter"/>
+        <module name="SingleSpaceSeparator">
+            <property name="validateComments" value="false"/>
+        </module>
+        <module name="TypecastParenPad"/>
+
+        <!-- Скобки -->
+        <module name="LeftCurly"/>
+        <module name="RightCurly"/>
+        <module name="NeedBraces">
+            <property name="allowSingleLineStatement" value="true"/>
+        </module>
+
+        <!-- Качество кода -->
+        <module name="EmptyBlock">
+            <property name="option" value="TEXT"/>
+        </module>
+        <module name="EmptyCatchBlock">
+            <property name="exceptionVariableName" value="expected|ignored|_"/>
+        </module>
+        <module name="FallThrough"/>
+        <module name="MultipleVariableDeclarations"/>
+        <module name="OneStatementPerLine"/>
+        <module name="UpperEll"/>
+        <module name="ArrayTypeStyle"/>
+        <module name="MissingSwitchDefault"/>
+        <module name="DefaultComesLast"/>
+        <module name="NoFinalizer"/>
+        <module name="OverloadMethodsDeclarationOrder"/>
+        <module name="EqualsHashCode"/>
+        <module name="EmptyStatement"/>
+        <module name="SimplifyBooleanExpression"/>
+        <module name="SimplifyBooleanReturn"/>
+        <module name="InnerAssignment"/>
+        <module name="FinalClass"/>
+        <!-- Класс с одними статическими членами должен прятать конструктор.
+             Точка входа Spring Boot выглядит так же (один main), но утилитой
+             не является — исключается фильтром по аннотации ниже -->
+        <module name="HideUtilityClassConstructor"/>
+        <module name="SuppressionXpathSingleFilter">
+            <property name="checks" value="HideUtilityClassConstructor"/>
+            <property name="query"
+                      value="//CLASS_DEF[./MODIFIERS/ANNOTATION/IDENT[@text='SpringBootApplication']]"/>
+        </module>
+        <!-- Поля закрыты; на тестах правило отключено фильтром выше -->
+        <module name="VisibilityModifier"/>
+        <module name="VariableDeclarationUsageDistance"/>
+
+        <!-- Размеры методов и сигнатур -->
+        <module name="MethodLength">
+            <property name="max" value="80"/>
+            <property name="countEmpty" value="false"/>
+        </module>
+        <module name="ParameterNumber">
+            <property name="max" value="7"/>
+        </module>
+
+        <!-- Модификаторы -->
+        <module name="ModifierOrder"/>
+        <module name="RedundantModifier"/>
+
+        <!-- Javadoc: обязателен на публичных типах, на методах — по желанию -->
+        <module name="MissingJavadocType">
+            <property name="scope" value="public"/>
+            <property name="skipAnnotations"
+                      value="SpringBootApplication,Configuration,RestController,Service,Repository,Component,Generated"/>
+        </module>
+        <!-- Пустой javadoc и описание, оборванное на полуслове, — ошибка.
+             Правило JavadocStyle, закрывавшее это раньше, из Checkstyle 13
+             удалено; его роль здесь играет SummaryJavadoc, как в google_checks -->
+        <module name="SummaryJavadoc"/>
+        <!-- Наличия javadoc на методах не требуем, но написанные теги
+             проверяем: @param на несуществующий параметр, лишний @return
+             у void и тому подобное -->
+        <module name="JavadocMethod">
+            <property name="allowMissingParamTags" value="true"/>
+            <property name="allowMissingReturnTag" value="true"/>
+            <property name="allowedAnnotations" value="Override, Test"/>
+        </module>
+        <module name="NonEmptyAtclauseDescription"/>
+        <module name="InvalidJavadocPosition"/>
+
+        <!-- Точечное подавление комментарием, когда правило мешает осознанно:
+             // CHECKSTYLE.OFF: RuleName … // CHECKSTYLE.ON: RuleName -->
+        <module name="SuppressionCommentFilter">
+            <property name="offCommentFormat" value="CHECKSTYLE.OFF\: ([\w\|]+)"/>
+            <property name="onCommentFormat" value="CHECKSTYLE.ON\: ([\w\|]+)"/>
+            <property name="checkFormat" value="$1"/>
+        </module>
+
+    </module>
+</module>

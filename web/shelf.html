@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Полка и подборки — bookcase</title>
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<main>
+    <h1>Полка и подборки</h1>
+    <p class="note pull-up">
+        Полка отвечает на вопрос «читаю или прочитал» — значение у книги ровно одно.
+        Подборка отвечает на другой вопрос: «зачем собраны вместе». Книга может быть
+        в любом числе подборок и при этом стоять на любой полке.
+    </p>
+
+    <h2>Полка</h2>
+    <div class="row" id="shelves"></div>
+    <div class="books" id="shelf-books" class="gap-lg"></div>
+
+    <h2 class="gap-xl">Подборки</h2>
+    <form class="panel" id="new-collection">
+        <div class="row">
+            <label class="visually-hidden" for="collection-name">Название подборки</label>
+            <input type="text" id="collection-name" placeholder="Название подборки: «к экзамену», «есть на бумаге»"
+                   class="grow" maxlength="200">
+            <button class="primary" type="submit">Создать</button>
+        </div>
+        <p class="note form-error" id="collection-error"></p>
+    </form>
+
+    <table class="list" id="collections">
+        <thead><tr><th>Название</th><th class="col-count">Книг</th><th class="col-actions"></th></tr></thead>
+        <tbody></tbody>
+    </table>
+    <p class="empty hidden" id="no-collections">Подборок пока нет.</p>
+</main>
+
+<script src="/js/app.js" defer></script>
+<script src="/js/shelf.js" defer></script>
+</body>
+</html>

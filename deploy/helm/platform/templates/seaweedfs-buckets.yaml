@@ -1,0 +1,62 @@
+{{- if .Values.seaweedfs.enabled }}
+# Корзины заводятся разовой задачей после установки: чарт хранилища их не создаёт,
+# а сервисы рассчитывают, что они уже есть.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seaweedfs-buckets
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 10
+  # Успешную задачу убирает сам helm (hook-delete-policy выше), но неуспешную он
+  # оставляет — чтобы было где посмотреть, чем кончилось. Через сутки её убирает
+  # кластер: разбирательство к этому времени либо состоялось, либо уже неактуально.
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      name: seaweedfs-buckets
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+      volumes:
+        # weed пишет свой журнал в /tmp и без права записи туда не запускается вовсе.
+        # Отдельный том — чтобы остальная файловая система оставалась только для чтения.
+        - name: tmp
+          emptyDir: {}
+      containers:
+        - name: buckets
+          image: chrislusf/seaweedfs:4.41
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              # Хранилище отвечает «здоров» раньше, чем поднимается файлер, а корзины
+              # заводятся именно через него — поэтому ждём его, а не мастер.
+              until wget -q -O /dev/null http://{{ .Release.Name }}-seaweedfs-filer:8888/; do
+                echo "ждём файлер"; sleep 3
+              done
+              echo 's3.bucket.create -name books
+              s3.bucket.create -name covers
+              s3.bucket.create -name exports' | weed shell -master={{ .Release.Name }}-seaweedfs-master:9333
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+{{- end }}
